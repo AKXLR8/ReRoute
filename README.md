@@ -22,7 +22,9 @@ Working and covered by tests:
   dashboard, and Prometheus
 - OpenTelemetry tracing: request spans + per-provider `llm.chat` spans over
   OTLP/HTTP (opt-in, see [Telemetry](#telemetry))
-- React dashboard: analytics (incl. TTFT / tok-per-sec chart), logs, models, settings, users
+- React app: public landing + model registry (`/`, `/models`), dashboard
+  (analytics with TTFT/tok-per-sec chart, logs, models, settings, users),
+  live price-compare modal, rate-limit toasts with retry countdown
 
 Not built (don't plan around it):
 
@@ -45,26 +47,53 @@ Known rough edges:
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    Client["Client App<br/>(OpenAI SDK)"] -->|Bearer JWT| Auth
+
+    subgraph GW["ReRouteAI gateway (FastAPI)"]
+        direction LR
+        Auth["Auth"] --> Dedup["Dedup"]
+        Dedup --> RL["Rate limit<br/>RPM · TPM · concurrent"]
+        RL --> Guard["Input<br/>guardrails"]
+        Guard --> Cache{"Semantic<br/>cache"}
+        Cache -->|"hit (0 tokens)"| Return["Return"]
+        Cache -->|miss| Router["Route<br/>breaker · retry · fallback"]
+        Router --> Prov["Provider call"]
+        Prov --> OutGuard["Output<br/>guardrails"]
+        OutGuard --> Audit["Audit + metrics"]
+        Audit --> Store["Cache store"]
+        Store --> Return
+    end
+
+    subgraph PROVS["Providers — BYOK per user (ollama keyless)"]
+        direction TB
+        P1["OpenAI"] --- P2["Anthropic"] --- P3["Gemini"] --- P4["Groq"]
+        P5["Mercury"] --- P6["Cerebras"] --- P7["Together"] --- P8["Ollama"]
+    end
+
+    Prov --> PROVS
+
+    GW <--> PG[("Postgres<br/>users · audit_logs<br/>provider_keys")]
+    GW <--> RD[("Redis<br/>rate limits · cache<br/>dedup · throttle")]
+    GW --> PROM["Prometheus → Grafana<br/>14 forge_* metrics"]
+
+    NOTE["SSE stream path: rate limit → guard → provider only<br/>(no dedup, no cache)"]
+    NOTE -.-> GW
 ```
-┌─────────────┐     ┌──────────────────────────────────────────┐     ┌──────────────┐
-│  Client App  │────▶│              ReRouteAI                      │────▶│   LLM APIs   │
-│              │◀────│                                          │◀────│              │
-└─────────────┘     │  Auth → Rate Limit → Guard → Cache →      │     │  OpenAI      │
-                    │  Route → Provider → Audit → Return        │     │  Anthropic   │
-                    └──────────────────────────────────────────┘     │  Gemini      │
-                           │              │              │           │  Groq        │
-                      ┌────▼────┐   ┌─────▼─────┐  ┌───▼───┐      │  Mercury      │
-                      │ Postgres │   │   Redis    │  │Prom.  │      │  Cerebras     │
-                      │          │   │            │  │Grafana│      │  Together     │
-                      └─────────┘   └────────────┘  └───────┘      │  Ollama       │
-                                                                   └──────────────┘
-```
+
+Request pipeline (non-stream): **dedup → rate limit → input guardrails →
+semantic cache → route (circuit breaker + retry + fallback) → provider →
+output guardrails → audit → metrics → cache store**. Streams run rate limit →
+guard → provider and skip dedup + cache (an answer is never replayed).
 
 ## Quick Start
 
 ### Docker Compose (backend stack)
 
 ```bash
+git clone https://github.com/AKXLR8/ReRoute.git
+cd ReRoute
 cp backend/.env.example backend/.env
 # Edit .env — at minimum JWT_SECRET and ADMIN_API_KEY
 
@@ -186,6 +215,7 @@ wildcard allowed hosts.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `DATABASE_URL` | `postgresql+asyncpg://forge:forge@localhost:5432/reroute` | |
+| `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | `20` / `10` | asyncpg pool sizing |
 | `REDIS_URL` | `redis://localhost:6379/0` | |
 | `JWT_SECRET` | `change-me-in-production` | signs account tokens; 32+ chars required in prod |
 | `FERNET_KEY` | — | BYOK key encryption. Falls back to `JWT_SECRET` if unset (legacy) |
@@ -204,6 +234,7 @@ wildcard allowed hosts.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | keyless, available to every account |
 | `DEFAULT_RATE_LIMIT_RPM` / `_TPM` / `_CONCURRENT` | `60` / `100000` / `10` | applied per user, not per plan |
 | `SEMANTIC_CACHE_THRESHOLD` / `_TTL_SECONDS` | `0.92` / `3600` | cache is scoped per user |
+| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model behind semantic-cache matching |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` / `_RECOVERY_SECONDS` | `5` / `30` | |
 | `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_DELAY` | `3` / `0.5` | |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | 413 above this |
@@ -218,6 +249,42 @@ wildcard allowed hosts.
 | `LOG_LEVEL` | `info` | uvicorn log level |
 | `UVICORN_PROXY_HEADERS` | `true` | trust `X-Forwarded-*` from a reverse proxy |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | proxy IPs to trust; set to your LB's address/IP in production so per-IP limits see real client IPs |
+| `UVICORN_RELOAD` | off | dev-only auto-reload (`run.py`) |
+| `VITE_API_URL` | — (frontend) | build-time API base URL; empty = same-origin/proxy (dev uses the Vite proxy) |
+
+## Deployment
+
+The backend ships as a container — no secrets are baked into the image; everything
+comes from env at runtime. Migrations run automatically at boot
+(`MIGRATE_ON_STARTUP=true`).
+
+```bash
+docker build -t reroute backend/
+docker run -p 8000:8000 --env-file backend/.env reroute   # gateway only
+# or: docker compose up   # gateway + postgres + redis + prometheus + grafana
+```
+
+Production checklist (`backend/.env`):
+
+- `ENVIRONMENT=production` — refuses to boot on placeholder secrets, wildcard
+  CORS, or wildcard allowed hosts
+- `JWT_SECRET`, `ADMIN_API_KEY` — random 32+ chars each
+- `FERNET_KEY` — set **before any user connects a key**; it encrypts BYOK keys
+  at rest, and rotating it later makes already-stored keys unreadable
+- `CORS_ORIGINS` / `ALLOWED_HOSTS` — your real origins/hosts (no `*`)
+- `GITHUB_REDIRECT_URI` / `FRONTEND_BASE_URL` — must match your public domain
+  if you use GitHub sign-in
+- `FORWARDED_ALLOW_IPS` — your reverse proxy's IP so login rate limits see real
+  client IPs instead of the proxy's
+- Put TLS in front (Caddy/nginx); the app itself serves plain HTTP
+
+The frontend is a static bundle, not part of compose — build with the API URL
+baked in, then serve `frontend/dist/` anywhere:
+
+```bash
+cd frontend
+VITE_API_URL=https://api.yourdomain npm run build
+```
 
 ## Telemetry
 
@@ -291,13 +358,14 @@ docker-compose.yml      # postgres, redis, gateway, prometheus, grafana
 ## Tests and gates
 
 ```bash
-# Backend — 190 tests, must be green
+# Backend — 212 tests, must be green
 cd backend
 python -m pytest tests/ -q
-ruff check reroute tests
+ruff check reroute tests run.py
 
 # Frontend — type check + lint + build
 cd frontend
+npx tsc -b
 npm run lint
 npm run build          # tsc -b && vite build
 ```
