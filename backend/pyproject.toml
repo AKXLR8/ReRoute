@@ -23,10 +23,28 @@ dependencies = [
     "cryptography>=42.0.0",
     "numpy>=1.26.0",
     "sentence-transformers>=3.0.0",
+    "torch>=2.0",
     "opentelemetry-sdk>=1.25.0",
     "opentelemetry-exporter-otlp-proto-http>=1.25.0",
     "opentelemetry-instrumentation-fastapi>=0.46b0",
 ]
+
+# Vercel builds run on Linux: resolve torch from the CPU wheel index there so
+# the function bundle stays under the 500 MB limit (PyPI linux wheels pull
+# multi-GB CUDA libs). pip/Docker ignore these tables — Docker pre-installs
+# CPU torch itself.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+# Vercel build command: bake the embedding model into the function bundle so
+# cold starts never download it.
+[tool.vercel.scripts]
+build = "python scripts/prefetch_model.py"
 
 [project.optional-dependencies]
 dev = [

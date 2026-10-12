@@ -6,13 +6,20 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
+from pathlib import Path
 
 import numpy as np
 from redis.asyncio import Redis
 
 from ..config import get_settings
 from ..schemas.chat import ChatRequest
+
+# Vercel: scripts/prefetch_model.py baked the model into .hf/ at build time;
+# the runtime FS is read-only, so point the HF cache at the bundled copy.
+if os.environ.get("VERCEL"):
+    os.environ.setdefault("HF_HOME", str(Path(__file__).resolve().parents[2] / ".hf"))
 
 log = logging.getLogger(__name__)
 

@@ -3,6 +3,7 @@
 !.env.example
 *.log
 *.egg-info/
+.hf/
 .vscode/
 .idea/
 .DS_Store
