@@ -1,0 +1,21 @@
+# Never bake secrets or local state into the image
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Caches / test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Not needed at runtime
+tests/
+*.md
+.git/
+.gitignore

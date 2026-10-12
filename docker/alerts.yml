@@ -1,0 +1,37 @@
+groups:
+  - name: reroute
+    rules:
+      - alert: ProviderDown
+        expr: min by (provider) (forge_provider_health) == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} unhealthy"
+
+      - alert: CircuitBreakerOpen
+        expr: max by (provider) (forge_circuit_breaker_state) == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker open for {{ $labels.provider }}"
+
+      - alert: HighErrorRate
+        expr: |
+          sum by (provider) (rate(forge_requests_total{status="error"}[5m]))
+          / sum by (provider) (rate(forge_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Error rate above 5% for {{ $labels.provider }}"
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(0.95, sum by (provider, le) (rate(forge_request_latency_seconds_bucket[5m]))) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p95 latency above 10s for {{ $labels.provider }}"

@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+*.log
+*.egg-info/
+.vscode/
+.idea/
+.DS_Store

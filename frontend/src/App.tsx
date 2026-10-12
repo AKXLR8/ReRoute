@@ -1,0 +1,100 @@
+import { useEffect, useState } from 'react';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import TopNav from './components/TopNav';
+import Landing from './pages/Landing';
+import Models from './pages/Models';
+import AnalyticsDashboard from './pages/AnalyticsDashboard';
+import SettingsPage from './pages/Settings';
+import LogsPage from './pages/Logs';
+import UsersPage from './pages/Users';
+import { ArrowRight } from 'lucide-react';
+import { bootSession, exchangeGithub, type SessionUser } from './lib/auth';
+import { ToastInitializer } from './components/ToastInitializer';
+import Auth from './pages/Auth';
+
+function DashboardShell() {
+  const [user, setUser] = useState<SessionUser | null>(null);
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      // GitHub OAuth landed here with a one-time code — trade it for a session first
+      const params = new URLSearchParams(window.location.search);
+      const ghCode = params.get('gh_code');
+      if (ghCode) {
+        params.delete('gh_code');
+        const qs = params.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+        try { await exchangeGithub(ghCode); } catch { /* stale code → fall through to boot */ }
+      }
+      bootSession().then((u) => {
+        if (!alive) return;
+        setUser(u);
+        setChecking(false);
+      });
+    })();
+    const onExpired = () => setUser(null);
+    window.addEventListener('auth:expired', onExpired);
+    return () => {
+      alive = false;
+      window.removeEventListener('auth:expired', onExpired);
+    };
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg-base)' }}>
+        <p className="text-sm text-[#6B7280]">Loading…</p>
+      </div>
+    );
+  }
+  if (!user) return <Auth onLogin={(u) => setUser(u)} />;
+
+  const isAdmin = user.role === 'admin';
+  return (
+    <Routes>
+      <Route index element={<AnalyticsDashboard />} />
+      <Route path="models" element={<Models />} />
+      <Route path="logs" element={<LogsPage />} />
+      <Route path="settings" element={<SettingsPage />} />
+      <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/dashboard" replace />} />
+    </Routes>
+  );
+}
+
+function PublicPage({ children }: { children: React.ReactNode }) {
+  const [getKey, setGetKey] = useState(false);
+  return (
+    <>
+      <TopNav onGetKey={() => setGetKey(true)} />
+      {children}
+      {getKey && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={() => setGetKey(false)}>
+          <div className="w-full max-w-sm mx-4 p-6 rounded-2xl shadow-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-white mb-2">Open the dashboard</h3>
+            <p className="text-sm text-[#6B7280] mb-5">Sign in to your account to connect providers and track spend.</p>
+            <a href="/dashboard" className="w-full h-10 rounded-xl text-sm font-medium text-black flex items-center justify-center gap-2" style={{ background: '#00D2A0' }}>
+              Go to Dashboard <ArrowRight className="w-4 h-4" />
+            </a>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+export default function App() {
+  return (
+    <>
+      <ToastInitializer />
+      <Routes>
+        <Route path="/" element={<PublicPage><Landing /></PublicPage>} />
+        <Route path="/models" element={<PublicPage><Models /></PublicPage>} />
+        <Route path="/docs" element={<PublicPage><div className="container-x py-24 text-center"><h1 className="text-3xl font-bold text-white">Documentation</h1><p className="text-[#6B7280] mt-3">Coming soon.</p></div></PublicPage>} />
+        <Route path="/dashboard/*" element={<DashboardShell />} />
+      </Routes>
+    </>
+  );
+}
