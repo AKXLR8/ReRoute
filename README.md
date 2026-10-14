@@ -286,6 +286,22 @@ cd frontend
 VITE_API_URL=https://api.yourdomain npm run build
 ```
 
+### Vercel
+
+Git-based deploy as two projects: backend (Root Directory `backend/` — loads
+`main.py`, installs from `uv.lock`, build hook prefetches the embedding model
+into `.hf/`) and frontend (Root Directory `frontend/`).
+
+Backend env requirements beyond the checklist above:
+
+- `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` — the Python bundle (CPU torch +
+  sentence-transformers + baked model) is ~1.4 GB, over the 500 MB default;
+  Large Functions raises the cap to 5 GB (beta, no additional cost)
+- `MIGRATE_ON_STARTUP=false` — run alembic from a release step instead
+  (already-applied migrations don't re-run; concurrent instances would race)
+- `ENVIRONMENT=production`, plus real `CORS_ORIGINS` / `ALLOWED_HOSTS`
+  after the frontend project's URL is known
+
 ## Telemetry
 
 Two independent layers:
