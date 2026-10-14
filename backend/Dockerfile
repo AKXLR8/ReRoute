@@ -9,10 +9,6 @@ RUN apt-get update \
 
 RUN useradd --create-home --uid 1000 appuser
 
-# CPU-only torch first (~200MB vs ~2GB CUDA wheels) — sentence-transformers
-# depends on torch; pip sees it installed and skips the GPU build.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
 # Dependency layer: manifest + package source, non-editable install.
 # .dockerignore keeps .env / .venv / tests out of the build context.
 COPY --chown=appuser:appuser pyproject.toml ./

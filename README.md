@@ -234,7 +234,7 @@ wildcard allowed hosts.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | keyless, available to every account |
 | `DEFAULT_RATE_LIMIT_RPM` / `_TPM` / `_CONCURRENT` | `60` / `100000` / `10` | applied per user, not per plan |
 | `SEMANTIC_CACHE_THRESHOLD` / `_TTL_SECONDS` | `0.92` / `3600` | cache is scoped per user |
-| `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model behind semantic-cache matching |
+| `EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | ONNX model behind semantic-cache matching |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` / `_RECOVERY_SECONDS` | `5` / `30` | |
 | `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_DELAY` | `3` / `0.5` | |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | 413 above this |
@@ -294,9 +294,9 @@ into `.hf/`) and frontend (Root Directory `frontend/`).
 
 Backend env requirements beyond the checklist above:
 
-- `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` — the Python bundle (CPU torch +
-  sentence-transformers + baked model) is ~1.4 GB, over the 500 MB default;
-  Large Functions raises the cap to 5 GB (beta, no additional cost)
+- No Large Functions flag needed — onnxruntime instead of torch keeps the
+  Python bundle ~460 MB, under the 500 MB default cap (quantized model baked
+  in); revisit `VERCEL_SUPPORT_LARGE_FUNCTIONS=1` if dependencies grow
 - `MIGRATE_ON_STARTUP=false` — run alembic from a release step instead
   (already-applied migrations don't re-run; concurrent instances would race)
 - `ENVIRONMENT=production`, plus real `CORS_ORIGINS` / `ALLOWED_HOSTS`

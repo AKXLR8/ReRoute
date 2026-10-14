@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # --- Cache ---
     semantic_cache_threshold: float = 0.92
     semantic_cache_ttl_seconds: int = 3600
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "Xenova/all-MiniLM-L6-v2"
 
     # --- Rate Limits (global — single-tenant gateway) ---
     default_rate_limit_rpm: int = 60

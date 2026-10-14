@@ -1,4 +1,4 @@
-"""Redis-backed semantic cache using local sentence-transformers embeddings."""
+"""Redis-backed semantic cache using a local ONNX embedding model."""
 
 from __future__ import annotations
 
@@ -30,35 +30,57 @@ _SCAN_LIMIT = 50
 
 
 def _get_model():
-    """Lazy-load the sentence-transformer model (one-time ~80MB download)."""
+    """Lazy-load the ONNX session + tokenizer (bundled under HF_HOME on Vercel)."""
     global _model
     if _model is None:
-        from sentence_transformers import SentenceTransformer
-        settings = get_settings()
-        log.info("Loading embedding model: %s", settings.embedding_model)
-        _model = SentenceTransformer(settings.embedding_model)
-        log.info("Embedding model loaded (dim=%d)", _model.get_embedding_dimension())
+        import onnxruntime as ort
+        from huggingface_hub import hf_hub_download
+        from tokenizers import Tokenizer
+
+        name = get_settings().embedding_model
+        log.info("Loading ONNX embedding model: %s", name)
+        tokenizer = Tokenizer.from_file(hf_hub_download(name, "tokenizer.json"))
+        tokenizer.enable_truncation(max_length=256)
+        session = ort.InferenceSession(
+            hf_hub_download(name, "onnx/model_quantized.onnx"),
+            providers=["CPUExecutionProvider"],
+        )
+        _model = (tokenizer, session)
     return _model
 
 
+def _mean_pool(hidden: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Attention-mask-weighted mean pooling — parity with sentence-transformers."""
+    m = mask.astype(np.float32)[..., None]
+    return (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)
+
+
+def _embed_sync(texts: list[str]) -> np.ndarray:
+    """Tokenize → ONNX → mean-pool → L2-normalize. Returns (n, dim)."""
+    tokenizer, session = _get_model()
+    encodings = [tokenizer.encode(t) for t in texts]
+    max_len = max(len(e.ids) for e in encodings)
+    input_ids = np.zeros((len(encodings), max_len), dtype=np.int64)
+    attention_mask = np.zeros((len(encodings), max_len), dtype=np.int64)
+    for row, enc in enumerate(encodings):
+        input_ids[row, : len(enc.ids)] = enc.ids
+        attention_mask[row, : len(enc.attention_mask)] = enc.attention_mask
+    hidden = session.run(
+        ["last_hidden_state"],
+        {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "token_type_ids": np.zeros_like(input_ids),
+        },
+    )[0]
+    pooled = _mean_pool(hidden, attention_mask)
+    return pooled / np.maximum(np.linalg.norm(pooled, axis=1, keepdims=True), 1e-9)
+
+
 async def _embed_text(text: str) -> list[float]:
-    """Encode off the event loop — torch inference must never block it."""
+    """Encode off the event loop — ONNX inference must never block it."""
     loop = asyncio.get_running_loop()
-
-    def _encode() -> list[float]:
-        return _get_model().encode(text, normalize_embeddings=True).tolist()
-
-    return await loop.run_in_executor(None, _encode)
-
-
-async def _embed_batch(texts: list[str]) -> list[list[float]]:
-    """Encode off the event loop — torch inference must never block it."""
-    loop = asyncio.get_running_loop()
-
-    def _encode() -> list[list[float]]:
-        return _get_model().encode(texts, normalize_embeddings=True).tolist()
-
-    return await loop.run_in_executor(None, _encode)
+    return (await loop.run_in_executor(None, _embed_sync, [text]))[0].tolist()
 
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
