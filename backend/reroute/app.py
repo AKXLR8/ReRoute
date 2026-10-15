@@ -219,6 +219,10 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "ok"}
 
+    @app.get("/")
+    async def root():
+        return {"service": "reroute", "health": "/health"}
+
     @app.get("/readyz")
     async def ready(http_request: Request, db: AsyncSession = Depends(get_db)):
         """Readiness: Postgres + Redis reachable. Use for k8s readinessProbe."""
