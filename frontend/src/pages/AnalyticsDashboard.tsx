@@ -1,9 +1,10 @@
-﻿import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { KeyRound, RefreshCw, Wifi } from 'lucide-react';
-import { api, displayName, displayColor, type AuditLog } from '../lib/api';
+import { api, displayName, displayColor, providerDisplay, type AuditLog } from '../lib/api';
 import { signOut } from '../lib/nav';
 import { DashPage, Segmented } from '../components/dashboard/DashPage';
 import { ActivityChart } from '../components/dashboard/ActivityChart';
@@ -11,37 +12,138 @@ import { CostChart } from '../components/dashboard/CostChart';
 import { TokensChart } from '../components/dashboard/TokensChart';
 import { CachingChart } from '../components/dashboard/CachingChart';
 import { SpeedChart } from '../components/dashboard/SpeedChart';
-import { TopList } from '../components/dashboard/TopList';
+import { TopList, type TopItem } from '../components/dashboard/TopList';
 import { NewestModels } from '../components/dashboard/NewestModels';
 import { PriceCompareModal } from '../components/dashboard/PriceCompareModal';
 import { ErrorBoundary } from '../components/dashboard/ErrorBoundary';
-import { cheapestByProvider, entryUrl, fetchMarket, fmtUsd, isFree, pricesFor, providerUrl } from '../lib/pricing';
+import { cheapestByProvider, entryUrl, fetchMarket, fmtUsd, isFree, modelUrl, pricesFor, providerUrl, registryName, type PriceEntry } from '../lib/pricing';
 
-function CardStack() {
+const DARK_FACE = {
+  background: 'linear-gradient(160deg,#18181B 0%,#0B0B0C 100%)',
+  border: '1px solid rgba(255,255,255,0.10)',
+  boxShadow: '0 24px 48px rgba(0,0,0,0.55)',
+};
+
+const BRAND_FACE = { background: 'linear-gradient(135deg,#C7D2FE 0%,#A5B4FC 45%,#818CF8 100%)', boxShadow: '0 24px 48px rgba(0,0,0,0.45)' };
+
+function CardShell({ face, children }: { face: CSSProperties; children: ReactNode }) {
   return (
-    <div className="relative h-[236px] select-none">
-      <div className="absolute left-0 top-6 w-[84%] h-[188px] rounded-2xl rotate-[-7deg]" style={{ background: 'linear-gradient(135deg,#C7D2FE 0%,#A5B4FC 45%,#818CF8 100%)' }} />
-      <div className="absolute right-0 top-0 w-[86%] h-[200px] rounded-2xl p-5 flex flex-col"
-        style={{ background: 'linear-gradient(160deg,#18181B 0%,#0B0B0C 100%)', border: '1px solid rgba(255,255,255,0.10)', boxShadow: '0 24px 48px rgba(0,0,0,0.55)' }}>
+    <div className="w-full h-full rounded-2xl p-5 flex flex-col overflow-hidden" style={face}>
+      {children}
+    </div>
+  );
+}
+
+function CardBrandRow({ invert }: { invert?: boolean }) {
+  return (
+    <div className="flex items-start justify-between">
+      <div className="flex items-center gap-2">
+        <img src="/logo.png" alt="" className="h-18 w-auto object-contain" style={invert ? { filter: 'brightness(0) invert(1)' } : undefined} />
+        <span className="text-[13px] font-medium text-white">ReRouteAI.</span>
+      </div>
+      <Wifi className="w-5 h-5 text-white/60 -rotate-90" />
+    </div>
+  );
+}
+
+function CardMeta({ label, right, line, foot }: { label: string; right: string; line: string; foot: string }) {
+  return (
+    <div className="mt-auto">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[11px] uppercase tracking-wider text-white/45">{label}</span>
+        <span className="text-[11px] text-white/45 font-mono">{right}</span>
+      </div>
+      <p className="text-[12px] sm:text-[16px] font-mono tracking-[0.12em] sm:tracking-[0.16em] text-white truncate">{line}</p>
+      <div className="flex items-center justify-between mt-3">
+        <span className="text-[12px] text-white/60">{foot}</span>
+        <span className="w-8 h-5 rounded-full bg-white/15 relative shrink-0"><span className="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white/90" /></span>
+      </div>
+    </div>
+  );
+}
+
+/* three faces of the deck: prod key, routing, brand */
+const DECK = [
+  {
+    id: 'prod',
+    node: (
+      <CardShell face={DARK_FACE}>
+        <CardBrandRow invert />
+        <CardMeta label="gateway · prod" right="v0.1" line="sk-prod •••• •••• ••••" foot="40+ providers · 1 endpoint" />
+      </CardShell>
+    ),
+  },
+  {
+    id: 'routing',
+    node: (
+      <CardShell face={DARK_FACE}>
+        <CardBrandRow invert />
+        <CardMeta label="gateway · routing" right="v0.1" line="OpenAI-compatible" foot="routing · caching · failover" />
+      </CardShell>
+    ),
+  },
+  {
+    id: 'brand',
+    node: (
+      <CardShell face={BRAND_FACE}>
         <div className="flex items-start justify-between">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="" className="h-18 w-auto object-contain" style={{ filter: 'brightness(0) invert(1)' }} />
-            {<span className="text-[13px]  text-white">ReRouteAI.</span>}
+            <img src="/logo.png" alt="" className="h-18 w-auto object-contain" />
+            <span className="text-[13px] font-semibold text-[#1E1B4B]">ReRouteAI.</span>
           </div>
-          <Wifi className="w-5 h-5 text-white/60 -rotate-90" />
+          <Wifi className="w-5 h-5 text-[#1E1B4B]/50 -rotate-90" />
         </div>
-        <div className="mt-auto">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] uppercase tracking-wider text-white/45">gateway · prod</span>
-            <span className="text-[11px] text-white/45 font-mono">v0.1</span>
-          </div>
-          <p className="text-[12px] sm:text-[16px] font-mono tracking-[0.12em] sm:tracking-[0.16em] text-white truncate">sk-prod •••• •••• ••••</p>
-          <div className="flex items-center justify-between mt-3">
-            <span className="text-[12px] text-white/60">40+ providers · 1 endpoint</span>
-            <span className="w-8 h-5 rounded-full bg-white/15 relative shrink-0"><span className="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white/90" /></span>
-          </div>
+        <div className="mt-auto flex items-center justify-between">
+          <span className="text-[11px] uppercase tracking-wider text-[#1E1B4B]/60">gateway · brand</span>
+          <span className="w-8 h-5 rounded-full bg-black/15 relative shrink-0"><span className="absolute right-0.5 top-0.5 w-4 h-4 rounded-full bg-white/90" /></span>
         </div>
-      </div>
+      </CardShell>
+    ),
+  },
+];
+
+/* slot geometry: front, mid, back. every offset stays inside the 236px box,
+   so the deck never crosses into the Recent list below it */
+const SLOTS = [
+  { x: 0, y: 0, rotate: 0, scale: 1, zIndex: 30 },
+  { x: -13, y: 10, rotate: -3.5, scale: 0.965, zIndex: 20 },
+  { x: -26, y: 20, rotate: -7, scale: 0.93, zIndex: 10 },
+];
+
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+function CardStack() {
+  const [step, setStep] = useState(0);
+  const [paused, setPaused] = useState(false);
+
+  useEffect(() => {
+    if (paused || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const t = setInterval(() => setStep((s) => s + 1), 3400);
+    return () => clearInterval(t);
+  }, [paused]);
+
+  return (
+    <div
+      className="relative h-[236px] select-none"
+      aria-hidden="true"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
+      {SLOTS.map((slot, i) => {
+        const face = DECK[(step + i) % DECK.length];
+        return (
+          <motion.div
+            key={face.id}
+            className="absolute right-0 top-0 w-[86%] h-[200px]"
+            style={{ zIndex: slot.zIndex }}
+            initial={{ x: 0, y: 16, rotate: 0, scale: 1, opacity: 0 }}
+            animate={{ x: slot.x, y: slot.y, rotate: slot.rotate, scale: slot.scale, opacity: 1 }}
+            transition={{ duration: 0.65, ease: EASE, delay: i * 0.07 }}
+          >
+            {face.node}
+          </motion.div>
+        );
+      })}
     </div>
   );
 }
@@ -64,7 +166,7 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
               <p className={`text-[13px] ${l.cost_usd === 0 && l.is_cached ? 'text-emerald-400' : 'text-[var(--text-muted)]'}`}>
                 {l.is_cached
                   ? (l.cache_saved_usd > 0 ? `+ saved $${l.cache_saved_usd.toFixed(4)}` : '+ $0.00 cached')
-                  : `− $${l.cost_usd.toFixed(4)}`}
+                  : `- $${l.cost_usd.toFixed(4)}`}
               </p>
             </div>
             <div className="text-right shrink-0">
@@ -83,6 +185,8 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
     </div>
   );
 }
+
+const CONNECTABLE = new Set(Object.keys(providerDisplay));
 
 export default function AnalyticsDashboard() {
   const [days, setDays] = useState(30);
@@ -111,6 +215,94 @@ export default function AnalyticsDashboard() {
   const feed = market.data?.entries;
   const connected = useMemo(() => new Set((providerKeys.data ?? []).map((p) => p.provider)), [providerKeys.data]);
   const cheapestBy = useMemo(() => (feed ? cheapestByProvider(feed) : null), [feed]);
+
+  /* Cheapest *paid* model per connectable provider: free feed entries are
+     mostly toys/guard models, which make a poor "top" list. */
+  const paidBy = useMemo(() => {
+    const best = new Map<string, PriceEntry>();
+    for (const e of feed ?? []) {
+      const p = registryName(e.provider);
+      if (!CONNECTABLE.has(p) || isFree(e)) continue;
+      if (!best.has(p) || e.inPerM < best.get(p)!.inPerM) best.set(p, e);
+    }
+    return best;
+  }, [feed]);
+
+  /* Cards rank your real traffic first; leftover slots fill with other
+     connectable providers/models from the price feed (0 req) so the lists
+     stay populated and comparable. */
+  const providerItems = useMemo<TopItem[]>(() => {
+    const used: TopItem[] = (breakdown.data?.by_provider ?? [])
+      .filter((p) => !!p.name)
+      .map((p) => {
+        const c = cheapestBy?.get(p.name!);
+        return {
+          name: p.name ?? 'gateway',
+          sub: p.name ? displayName(p.name) : undefined,
+          requests: p.requests,
+          cost_usd: p.cost_usd,
+          price: c ? (isFree(c) ? `free model: ${c.model}` : `from ${fmtUsd(c.inPerM)}/1M · ${c.model}`) : undefined,
+          url: p.name ? providerUrl(p.name, market.data) : undefined,
+        };
+      });
+    if (!paidBy.size || used.length >= 5) return used;
+    const seen = new Set(used.map((i) => i.name));
+    const extra = [...paidBy.entries()]
+      .filter(([p]) => !seen.has(p))
+      .sort((a, b) => a[1].inPerM - b[1].inPerM)
+      .map(([p, c]) => ({
+        name: p,
+        sub: displayName(p),
+        requests: 0,
+        cost_usd: 0,
+        price: `from ${fmtUsd(c.inPerM)}/1M · ${c.model.slice(c.model.lastIndexOf('/') + 1)}`,
+        url: providerUrl(p, market.data),
+      }));
+    return [...used, ...extra.slice(0, 5 - used.length)];
+  }, [breakdown.data, paidBy, cheapestBy, market.data]);
+
+  const modelItems = useMemo<TopItem[]>(() => {
+    const used: TopItem[] = (breakdown.data?.by_model ?? [])
+      .filter((m) => !!m.model)
+      .map((m) => {
+        const matches = feed ? pricesFor(feed, m.model ?? '') : [];
+        const cheap = matches.length ? matches.reduce((a, b) => (b.inPerM < a.inPerM ? b : a)) : null;
+        const or = matches.find((e) => e.provider === 'openrouter');
+        const url = (or ? entryUrl(or) : matches.map(entryUrl).find((u) => u !== null)) ?? undefined;
+        return {
+          name: m.model ?? 'unknown',
+          sub: m.avg_ttft_ms != null
+            ? `${Math.round(m.avg_ttft_ms)}ms TTFT · ${Math.round(m.avg_latency_ms)}ms latency${m.truncated > 0 ? ` · ${m.truncated} truncated` : ''}`
+            : `${Math.round(m.avg_latency_ms)}ms avg latency`,
+          requests: m.requests,
+          cost_usd: m.cost_usd,
+          price: cheap ? (isFree(cheap) ? 'free to serve' : `from ${fmtUsd(cheap.inPerM)} in · ${fmtUsd(cheap.outPerM)} out /1M`) : undefined,
+          compare: matches.length,
+          onCompare: matches.length ? () => setCompare(m.model ?? '') : undefined,
+          url,
+        };
+      });
+    if (!paidBy.size || used.length >= 5) return used;
+    const seen = new Set(used.map((i) => i.name));
+    const extra = [...paidBy.entries()]
+      .filter(([, c]) => !seen.has(c.model))
+      .sort((a, b) => a[1].inPerM - b[1].inPerM)
+      .map(([p, c]) => {
+        // bare id: `vertex_ai/gemini-2.0-flash-lite` → `gemini-2.0-flash-lite`
+        const bare = c.model.slice(c.model.lastIndexOf('/') + 1);
+        return {
+          name: bare,
+          sub: displayName(p),
+          requests: 0,
+          cost_usd: 0,
+          price: `from ${fmtUsd(c.inPerM)} in · ${fmtUsd(c.outPerM)} out /1M`,
+          compare: pricesFor(feed ?? [], bare).length,
+          onCompare: () => setCompare(bare),
+          url: modelUrl(feed ?? [], bare) ?? undefined,
+        };
+      });
+    return [...used, ...extra.slice(0, 5 - used.length)];
+  }, [breakdown.data, feed, paidBy]);
 
   return (
     <DashPage
@@ -209,35 +401,8 @@ export default function AnalyticsDashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                  <TopList title="Top Providers" emptyHint="No traffic yet — send your first request through the gateway and providers will rank here." items={(breakdown.data?.by_provider ?? []).filter((p) => !!p.name).map((p) => {
-                    const c = p.name ? cheapestBy?.get(p.name) : undefined;
-                    return {
-                      name: p.name ?? 'gateway',
-                      sub: p.name ? displayName(p.name) : undefined,
-                      requests: p.requests,
-                      cost_usd: p.cost_usd,
-                      price: c ? (isFree(c) ? `free model: ${c.model}` : `from ${fmtUsd(c.inPerM)}/1M · ${c.model}`) : undefined,
-                      url: p.name ? providerUrl(p.name, market.data) : undefined,
-                    };
-                  })} />
-                  <TopList title="Top Models" emptyHint="No traffic yet — models you serve will rank here by requests and spend." items={(breakdown.data?.by_model ?? []).filter((m) => !!m.model).map((m) => {
-                    const matches = feed ? pricesFor(feed, m.model ?? '') : [];
-                    const cheap = matches.length ? matches.reduce((a, b) => (b.inPerM < a.inPerM ? b : a)) : null;
-                    const or = matches.find((e) => e.provider === 'openrouter');
-                    const url = (or ? entryUrl(or) : matches.map(entryUrl).find((u) => u !== null)) ?? undefined;
-                    return {
-                      name: m.model ?? 'unknown',
-                      sub: m.avg_ttft_ms != null
-                        ? `${Math.round(m.avg_ttft_ms)}ms TTFT · ${Math.round(m.avg_latency_ms)}ms latency${m.truncated > 0 ? ` · ${m.truncated} truncated` : ''}`
-                        : `${Math.round(m.avg_latency_ms)}ms avg latency`,
-                      requests: m.requests,
-                      cost_usd: m.cost_usd,
-                      price: cheap ? (isFree(cheap) ? 'free to serve' : `from ${fmtUsd(cheap.inPerM)} in · ${fmtUsd(cheap.outPerM)} out /1M`) : undefined,
-                      compare: matches.length,
-                      onCompare: matches.length ? () => setCompare(m.model ?? '') : undefined,
-                      url,
-                    };
-                  })} />
+                  <TopList title="Top Providers" emptyHint="No traffic yet — send your first request through the gateway and providers will rank here." items={providerItems} />
+                  <TopList title="Top Models" emptyHint="No traffic yet — models you serve will rank here by requests and spend." items={modelItems} />
                   <NewestModels loading={market.isLoading} items={(market.data?.newest ?? []).slice(0, 6)} />
                 </div>
               </div>
