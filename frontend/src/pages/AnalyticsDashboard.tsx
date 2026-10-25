@@ -133,7 +133,7 @@ export default function AnalyticsDashboard() {
               {unauthorized ? 'Session expired' : 'Could not load analytics'}
             </p>
             <p className="text-xs text-[var(--text-muted)] mb-4">
-              {unauthorized ? 'Your API key is no longer valid. Sign in again.' : 'Is the backend running? (expected at http://localhost:8000)'}
+              {unauthorized ? 'Your session expired — sign in again to reload your keys and spend.' : 'Could not reach the gateway API.'}
             </p>
             <div className="flex items-center justify-center gap-2">
               {!unauthorized && (

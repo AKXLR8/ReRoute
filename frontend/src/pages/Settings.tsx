@@ -87,7 +87,7 @@ function Providers() {
           {unauthorized ? 'Session expired' : 'Could not load providers'}
         </p>
         <p className="text-[11px] text-[var(--text-muted)] mb-3">
-          {unauthorized ? 'Your API key is no longer valid.' : 'Is the backend running?'}
+          {unauthorized ? 'Your session expired — sign in again.' : 'Could not reach the gateway API.'}
         </p>
         <button onClick={signOut} className="h-8 px-3 rounded-lg text-[11px] font-medium text-[var(--text-muted)] border border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--text-primary)] transition-colors">
           Sign out
