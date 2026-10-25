@@ -1,3 +1,4 @@
+
 /* Account sessions — access JWT (15 min) + rotating refresh token, both in
    localStorage. api.ts attaches the Bearer header and auto-refreshes on 401;
    this module owns everything about "who is signed in".
@@ -5,7 +6,7 @@
    ponytail: localStorage (not httpOnly cookies) matches the existing X-API-Key
    storage model — XSS is equally fatal for both; cookies would add CSRF surface. */
 
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
+const API_URL = 'https://re-route-pi.vercel.app';
 
 const ACCESS = 'access_token';
 const REFRESH = 'refresh_token';
@@ -25,6 +26,7 @@ interface TokenResponse {
 }
 
 export const accessToken = () => localStorage.getItem(ACCESS);
+
 export const storedUser = (): SessionUser | null => {
   try {
     const raw = localStorage.getItem(USER);
@@ -44,65 +46,128 @@ export function clearSession() {
   localStorage.removeItem(ACCESS);
   localStorage.removeItem(REFRESH);
   localStorage.removeItem(USER);
-  localStorage.removeItem('admin_api_key'); // legacy break-glass login is gone
+  localStorage.removeItem('admin_api_key');
 }
 
-async function post<T>(path: string, body: unknown, headers: Record<string, string> = {}): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+async function post<T>(
+  path: string,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: {
+      'Content-Type': 'application/json',
+      ...headers,
+    },
     body: JSON.stringify(body),
   });
+
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 401) throw new Error('Invalid email or password');
-    throw new Error((/"detail":\s*"([^"]+)"/.exec(text)?.[1]) ?? text);
+
+    if (res.status === 401) {
+      throw new Error('Invalid email or password');
+    }
+
+    let detail = text;
+
+    try {
+      const json = JSON.parse(text);
+      detail = json.detail ?? text;
+    } catch {
+      // Response was not JSON; retain the original text.
+    }
+
+    throw new Error(detail || `Request failed: ${res.status}`);
   }
-  if (res.status === 204) return undefined as T;
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   return res.json() as Promise<T>;
 }
 
 export function needsSetup(): Promise<{ needs_setup: boolean }> {
-  return fetch(`${BASE}/auth/setup`)
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.json();
+  return fetch(`${API_URL}/auth/setup`)
+    .then((res) => {
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      return res.json() as Promise<{ needs_setup: boolean }>;
     })
     .catch(() => ({ needs_setup: false }));
 }
 
-export async function login(email: string, password: string): Promise<SessionUser> {
-  const t = await post<TokenResponse>('/auth/login', { email, password });
+export async function login(
+  email: string,
+  password: string,
+): Promise<SessionUser> {
+  const t = await post<TokenResponse>('/auth/login', {
+    email,
+    password,
+  });
+
   saveSession(t);
   return t.user;
 }
 
-export async function register(email: string, password: string): Promise<SessionUser> {
-  const t = await post<TokenResponse>('/auth/register', { email, password });
+export async function register(
+  email: string,
+  password: string,
+): Promise<SessionUser> {
+  const t = await post<TokenResponse>('/auth/register', {
+    email,
+    password,
+  });
+
   saveSession(t);
   return t.user;
 }
 
 export async function exchangeGithub(code: string): Promise<SessionUser> {
-  const t = await post<TokenResponse>('/auth/github/exchange', { code });
+  const t = await post<TokenResponse>('/auth/github/exchange', {
+    code,
+  });
+
   saveSession(t);
   return t.user;
 }
 
-export async function setup(email: string, password: string, setupKey: string): Promise<SessionUser> {
-  const t = await post<TokenResponse>('/auth/setup', { email, password }, { 'X-API-Key': setupKey });
+export async function setup(
+  email: string,
+  password: string,
+  setupKey: string,
+): Promise<SessionUser> {
+  const t = await post<TokenResponse>(
+    '/auth/setup',
+    { email, password },
+    { 'X-API-Key': setupKey },
+  );
+
   saveSession(t);
   return t.user;
 }
 
-export async function changePassword(current_password: string, new_password: string): Promise<SessionUser> {
-  const t = await post<TokenResponse>('/auth/change-password', { current_password, new_password }, authHeader());
+export async function changePassword(
+  current_password: string,
+  new_password: string,
+): Promise<SessionUser> {
+  const t = await post<TokenResponse>(
+    '/auth/change-password',
+    { current_password, new_password },
+    authHeader(),
+  );
+
   saveSession(t);
   return t.user;
 }
 
 export function authHeader(): Record<string, string> {
   const token = accessToken();
+
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -110,20 +175,41 @@ export function authHeader(): Record<string, string> {
 export async function bootSession(): Promise<SessionUser | null> {
   const tryMe = async (): Promise<SessionUser | null> => {
     const token = accessToken();
-    if (!token) return null;
+
+    if (!token) {
+      return null;
+    }
+
     try {
-      const res = await fetch(`${BASE}/auth/me`, { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return null;
-      const u = (await res.json()) as SessionUser;
-      localStorage.setItem(USER, JSON.stringify(u));
-      return u;
+      const res = await fetch(`${API_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        return null;
+      }
+
+      const user = (await res.json()) as SessionUser;
+      localStorage.setItem(USER, JSON.stringify(user));
+
+      return user;
     } catch {
       return null;
     }
   };
+
   const user = await tryMe();
-  if (user) return user;
-  if (await refreshSession()) return tryMe();
+
+  if (user) {
+    return user;
+  }
+
+  if (await refreshSession()) {
+    return tryMe();
+  }
+
   clearSession();
   return null;
 }
@@ -132,17 +218,32 @@ let refreshing: Promise<boolean> | null = null;
 
 /** Rotate the refresh token (single flight). false = session is dead. */
 export function refreshSession(): Promise<boolean> {
-  if (refreshing) return refreshing;
+  if (refreshing) {
+    return refreshing;
+  }
+
   const raw = localStorage.getItem(REFRESH);
-  if (!raw) return Promise.resolve(false);
+
+  if (!raw) {
+    return Promise.resolve(false);
+  }
+
   refreshing = (async () => {
     try {
-      const res = await fetch(`${BASE}/auth/refresh`, {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: raw }),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          refresh_token: raw,
+        }),
       });
-      if (!res.ok) return false;
+
+      if (!res.ok) {
+        return false;
+      }
+
       saveSession((await res.json()) as TokenResponse);
       return true;
     } catch {
@@ -151,17 +252,23 @@ export function refreshSession(): Promise<boolean> {
       refreshing = null;
     }
   })();
+
   return refreshing;
 }
 
 export async function logout() {
   const raw = localStorage.getItem(REFRESH);
+
   clearSession();
+
   if (raw) {
     try {
-      await post<void>('/auth/logout', { refresh_token: raw });
+      await post<void>('/auth/logout', {
+        refresh_token: raw,
+      });
     } catch {
-      /* token already dead — local state is cleared either way */
+      // Local session is already cleared.
     }
   }
 }
+

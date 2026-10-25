@@ -1,20 +1,7 @@
+
 import { accessToken, clearSession, refreshSession } from './auth';
 
-/* ponytail: same-origin by default; set VITE_API_URL when the UI is hosted apart from the API */
-const BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '';
-
-/* Validate BASE is same-origin or explicitly allowlisted in production */
-if (BASE && import.meta.env.PROD) {
-  try {
-    const baseUrl = new URL(BASE, window.location.origin);
-    const selfUrl = new URL(window.location.origin);
-    if (baseUrl.origin !== selfUrl.origin) {
-      console.warn('[Security] VITE_API_URL points to different origin:', baseUrl.origin);
-    }
-  } catch {
-    console.error('[Security] Invalid VITE_API_URL:', BASE);
-  }
-}
+const API_URL = 'https://re-route-pi.vercel.app';
 
 interface ApiError {
   status: number;
@@ -25,49 +12,74 @@ interface ApiError {
 async function request<T>(path: string, opts?: RequestInit): Promise<T> {
   const send = () => {
     const token = accessToken();
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
       ...((opts?.headers as Record<string, string>) ?? {}),
     };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    return fetch(`${BASE}${path}`, { ...opts, headers });
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return fetch(`${API_URL}${path}`, {
+      ...opts,
+      headers,
+    });
   };
 
   let res = await send();
-  // expired access token → one silent refresh, then retry once
+
+  // Expired access token → attempt one silent refresh.
   if (res.status === 401 && accessToken()) {
-    if (await refreshSession()) res = await send();
-    else {
+    if (await refreshSession()) {
+      res = await send();
+    } else {
       clearSession();
       window.dispatchEvent(new Event('auth:expired'));
       throw new Error('401: Session expired');
     }
   }
+
   if (!res.ok) {
     let detail: string | undefined;
     let retryAfter: number | undefined;
+
     const retryHeader = res.headers.get('Retry-After');
-    if (retryHeader) retryAfter = Number(retryHeader);
+
+    if (retryHeader) {
+      retryAfter = Number(retryHeader);
+    }
+
     try {
       const json = await res.json();
-      detail = json.detail;
+      detail = json.detail ?? JSON.stringify(json);
     } catch {
-      const text = await res.text();
-      detail = text || res.statusText;
+      detail = await res.text() || res.statusText;
     }
-    // Show rate limit toast
+
+    // Show rate-limit toast.
     if (res.status === 429) {
-      const toast = await import('./toast').then(m => m.getToast());
-      if (toast) toast.addToast(detail || 'Too many requests', retryAfter || 60);
+      const toast = await import('./toast').then((m) => m.getToast());
+
+      if (toast) {
+        toast.addToast(detail || 'Too many requests', retryAfter || 60);
+      }
     }
+
     const err = new Error(`${res.status}: ${detail}`) as Error & ApiError;
     err.status = res.status;
     err.detail = detail;
     err.retryAfter = retryAfter;
+
     throw err;
   }
-  if (res.status === 204) return undefined as T;
+
+  if (res.status === 204) {
+    return undefined as T;
+  }
+
   return res.json();
 }
 
@@ -90,7 +102,7 @@ export interface AuditLog {
   trace_id: string | null;
 }
 
-/* BYOK — a connected provider key (write-only; server returns masked) */
+/* BYOK — connected provider key (write-only; server returns masked). */
 export interface ProviderKey {
   provider: string;
   base_url: string | null;
@@ -109,7 +121,6 @@ export interface ModelsResponse {
   object: string;
 }
 
-/* ponytail: single registry-name → display mapping shared by dashboard + models */
 export const providerDisplay: Record<string, string> = {
   openai: 'OpenAI',
   anthropic: 'Anthropic',
@@ -132,8 +143,11 @@ export const providerColor: Record<string, string> = {
   together: '#84CC16',
 };
 
-export const displayName = (provider: string) => providerDisplay[provider] ?? provider;
-export const displayColor = (provider: string) => providerColor[provider] ?? '#6B7280';
+export const displayName = (provider: string) =>
+  providerDisplay[provider] ?? provider;
+
+export const displayColor = (provider: string) =>
+  providerColor[provider] ?? '#6B7280';
 
 export interface Analytics {
   provider: string;
@@ -161,12 +175,27 @@ export interface ActivityDay {
   cache_saved_usd: number;
 }
 
-export interface BreakdownProvider { name: string | null; requests: number; cost_usd: number }
-export interface BreakdownModel {
-  model: string | null; requests: number; cost_usd: number; avg_latency_ms: number;
-  avg_ttft_ms: number | null; avg_tokens_per_sec: number | null; truncated: number;
+export interface BreakdownProvider {
+  name: string | null;
+  requests: number;
+  cost_usd: number;
 }
-export interface FinishReason { reason: string; count: number }
+
+export interface BreakdownModel {
+  model: string | null;
+  requests: number;
+  cost_usd: number;
+  avg_latency_ms: number;
+  avg_ttft_ms: number | null;
+  avg_tokens_per_sec: number | null;
+  truncated: number;
+}
+
+export interface FinishReason {
+  reason: string;
+  count: number;
+}
+
 export interface Breakdown {
   by_provider: BreakdownProvider[];
   by_model: BreakdownModel[];
@@ -183,41 +212,87 @@ export interface UserInfo {
 }
 
 export const api = {
-  // Per-user BYOK — this account's provider keys (write-only; masked on read)
+  // Per-user BYOK
   listProviders: () => request<ProviderKey[]>('/auth/providers'),
+
   connectProvider: (provider: string, apiKey: string, baseUrl?: string) =>
     request<ProviderKey>(`/auth/providers/${provider}`, {
       method: 'PUT',
-      body: JSON.stringify({ api_key: apiKey, base_url: baseUrl || null }),
+      body: JSON.stringify({
+        api_key: apiKey,
+        base_url: baseUrl || null,
+      }),
     }),
+
   disconnectProvider: (provider: string) =>
-    request<void>(`/auth/providers/${provider}`, { method: 'DELETE' }),
+    request<void>(`/auth/providers/${provider}`, {
+      method: 'DELETE',
+    }),
 
   // Logs
-  listLogs: (limit = 100) => request<AuditLog[]>(`/admin/logs?limit=${limit}`),
+  listLogs: (limit = 100) =>
+    request<AuditLog[]>(`/admin/logs?limit=${limit}`),
 
   // Analytics
-  getAnalytics: (days = 7) => request<Analytics[]>(`/admin/analytics?days=${days}`),
+  getAnalytics: (days = 7) =>
+    request<Analytics[]>(`/admin/analytics?days=${days}`),
 
-  // Per-day activity for charts (no fake fallback: errors must surface)
-  getActivity: (days = 7) => request<ActivityDay[]>(`/admin/activity?days=${days}`),
+  // Per-day activity
+  getActivity: (days = 7) =>
+    request<ActivityDay[]>(`/admin/activity?days=${days}`),
 
-  // Top providers / models by spend
-  getBreakdown: (days = 7) => request<Breakdown>(`/admin/breakdown?days=${days}`),
+  // Provider/model breakdown
+  getBreakdown: (days = 7) =>
+    request<Breakdown>(`/admin/breakdown?days=${days}`),
 
-  // Live model registry (shape: { data: [{ id, owned_by, providers }], object: 'list' })
-  listModels: () => request<ModelsResponse>('/v1/models'),
+  // Live model registry
+  listModels: () =>
+    request<ModelsResponse>('/v1/models'),
 
   // Health
-  getHealth: () => request<{ circuit_breakers: Record<string, { state: string; failure_count: number; is_available: boolean }> }>('/admin/health'),
+  getHealth: () =>
+    request<{
+      circuit_breakers: Record<
+        string,
+        {
+          state: string;
+          failure_count: number;
+          is_available: boolean;
+        }
+      >;
+    }>('/admin/health'),
 
-  // Account management (admin-only; backend 403s members)
-  listUsers: () => request<UserInfo[]>('/admin/users'),
-  createUser: (email: string, password: string, role: 'admin' | 'member') =>
-    request<UserInfo>('/admin/users', { method: 'POST', body: JSON.stringify({ email, password, role }) }),
-  updateUser: (id: string, patch: { role?: string; is_active?: boolean }) =>
-    request<UserInfo>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  // Account management
+  listUsers: () =>
+    request<UserInfo[]>('/admin/users'),
+
+  createUser: (
+    email: string,
+    password: string,
+    role: 'admin' | 'member',
+  ) =>
+    request<UserInfo>('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, role }),
+    }),
+
+  updateUser: (
+    id: string,
+    patch: { role?: string; is_active?: boolean },
+  ) =>
+    request<UserInfo>(`/admin/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
   resetUserPassword: (id: string, newPassword: string) =>
-    request<void>(`/admin/users/${id}/password`, { method: 'POST', body: JSON.stringify({ new_password: newPassword }) }),
-  deleteUser: (id: string) => request<void>(`/admin/users/${id}`, { method: 'DELETE' }),
+    request<void>(`/admin/users/${id}/password`, {
+      method: 'POST',
+      body: JSON.stringify({ new_password: newPassword }),
+    }),
+
+  deleteUser: (id: string) =>
+    request<void>(`/admin/users/${id}`, {
+      method: 'DELETE',
+    }),
 };
