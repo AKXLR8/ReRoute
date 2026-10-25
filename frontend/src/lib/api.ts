@@ -94,6 +94,7 @@ export interface AuditLog {
   cost_usd: number;
   latency_ms: number;
   status_code: number;
+  error_message: string | null;
   ttft_ms: number | null;
   tokens_per_sec: number | null;
   finish_reason: string | null;

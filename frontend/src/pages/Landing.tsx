@@ -83,10 +83,10 @@ function HeroSection() {
   const { ref, isInView } = useAnimateInView(0.1);
 
   return (
-    <section ref={ref} className="relative overflow-hidden">
-      {/* single full-bleed hero art (akashml style) — natural ratio, no stretch */}
+    <section ref={ref} className="relative overflow-hidden min-h-svh flex items-center">
+      {/* full-bleed hero art — covers the whole viewport-height hero */}
       <div className="absolute inset-0 flex items-center justify-center">
-        <img src="/new.png" alt="" loading="eager" className="w-full h-auto object-contain opacity-50" />
+        <img src="/new.png" alt="" loading="eager" className="w-full h-full object-cover opacity-50" />
       </div>
       {/* cinematic vignette: dark corners around the image */}
       <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(ellipse 130% 100% at 50% 46%, transparent 52%, rgba(0,0,0,0.92) 100%)' }} />

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 import { KeyRound, RefreshCw, Wifi } from 'lucide-react';
 import { api, displayName, displayColor, providerDisplay, type AuditLog } from '../lib/api';
@@ -13,6 +13,7 @@ import { TokensChart } from '../components/dashboard/TokensChart';
 import { CachingChart } from '../components/dashboard/CachingChart';
 import { SpeedChart } from '../components/dashboard/SpeedChart';
 import { TopList, type TopItem } from '../components/dashboard/TopList';
+import { ChartCard } from '../components/dashboard/ChartCard';
 import { NewestModels } from '../components/dashboard/NewestModels';
 import { PriceCompareModal } from '../components/dashboard/PriceCompareModal';
 import { ErrorBoundary } from '../components/dashboard/ErrorBoundary';
@@ -102,50 +103,67 @@ const DECK = [
   },
 ];
 
-/* slot geometry: front, mid, back. every offset stays inside the 236px box,
-   so the deck never crosses into the Recent list below it */
-const SLOTS = [
-  { x: 0, y: 0, rotate: 0, scale: 1, zIndex: 30 },
-  { x: -13, y: 10, rotate: -3.5, scale: 0.965, zIndex: 20 },
-  { x: -26, y: 20, rotate: -7, scale: 0.93, zIndex: 10 },
+/* the two cards behind the front one are plain edges (only ~13px ever shows),
+   so the stack can stay put while the front card is dealt. every offset stays
+   inside the 236px box, so nothing crosses into the Recent list below it */
+const STACK: { z: number; x: number; y: number; rotate: number; scale: number; delay: number; face: CSSProperties }[] = [
+  { z: 10, x: -26, y: 20, rotate: -7, scale: 0.93, delay: 0.12, face: BRAND_FACE },
+  { z: 20, x: -13, y: 10, rotate: -3.5, scale: 0.965, delay: 0.06, face: DARK_FACE },
 ];
 
 const EASE = [0.22, 1, 0.36, 1] as const;
+const EXIT_EASE = [0.4, 0, 1, 1] as const;
 
 function CardStack() {
   const [step, setStep] = useState(0);
   const [paused, setPaused] = useState(false);
+  /* reduced motion: keep rotating the faces, just cut the movement */
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const dur = (n: number) => (reduce ? 0 : n);
 
   useEffect(() => {
-    if (paused || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const t = setInterval(() => setStep((s) => s + 1), 3400);
+    if (paused) return;
+    const t = setInterval(() => setStep((s) => s + 1), 3200);
     return () => clearInterval(t);
   }, [paused]);
 
+  const face = DECK[step % DECK.length];
+
   return (
     <div
-      className="relative h-[236px] select-none"
+      className="relative h-[236px] select-none overflow-hidden"
       aria-hidden="true"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
-      {SLOTS.map((slot, i) => {
-        const face = DECK[(step + i) % DECK.length];
-        return (
-          <motion.div
-            key={face.id}
-            className="absolute right-0 top-0 w-[86%] h-[200px]"
-            style={{ zIndex: slot.zIndex }}
-            initial={{ x: 0, y: 16, rotate: 0, scale: 1, opacity: 0 }}
-            animate={{ x: slot.x, y: slot.y, rotate: slot.rotate, scale: slot.scale, opacity: 1 }}
-            transition={{ duration: 0.65, ease: EASE, delay: i * 0.07 }}
-          >
-            {face.node}
-          </motion.div>
-        );
-      })}
+      {STACK.map((s) => (
+        <motion.div
+          key={s.z}
+          className="absolute right-0 top-0 w-[86%] h-[200px] rounded-2xl"
+          style={{ zIndex: s.z, ...s.face }}
+          initial={{ x: 0, y: 16, rotate: 0, scale: 1, opacity: 0 }}
+          animate={{ x: s.x, y: s.y, rotate: s.rotate, scale: s.scale, opacity: 1 }}
+          transition={{ duration: dur(0.6), ease: EASE, delay: reduce ? 0 : s.delay }}
+        />
+      ))}
+      <AnimatePresence>
+        <motion.div
+          key={face.id}
+          className="absolute right-0 top-0 w-[86%] h-[200px]"
+          style={{ zIndex: 30 }}
+          initial={{ x: -30, y: 26, rotate: -9, scale: 0.88, opacity: 0 }}
+          animate={{ x: 0, y: 0, rotate: 0, scale: 1, opacity: 1, transition: { duration: dur(0.6), ease: EASE, delay: reduce ? 0 : 0.06 } }}
+          exit={{ x: 64, y: -12, rotate: 9, scale: 0.95, opacity: 0, transition: { duration: dur(0.4), ease: EXIT_EASE } }}
+        >
+          {face.node}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
+}
+
+function guardRule(msg: string | null | undefined) {
+  return /GuardrailViolation\[([a-z]+)\]/.exec(msg ?? '')?.[1] ?? 'policy';
 }
 
 function RecentList({ logs }: { logs: AuditLog[] }) {
@@ -162,11 +180,24 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
         return (
           <div key={l.id ?? i} className="flex items-center justify-between gap-3 py-3.5 border-t border-[var(--border)]">
             <div className="min-w-0">
-              <p className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{l.model_served}</p>
+              <p className="text-[14px] font-semibold text-[var(--text-primary)] truncate">
+                {l.model_served}
+                {l.status_code === 403 && (
+                  <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wider text-red-400">blocked</span>
+                )}
+                {l.status_code === 429 && (
+                  <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wider text-amber-400">rate limited</span>
+                )}
+                {l.status_code >= 500 && (
+                  <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wider text-amber-400">error {l.status_code}</span>
+                )}
+              </p>
               <p className={`text-[13px] ${l.cost_usd === 0 && l.is_cached ? 'text-emerald-400' : 'text-[var(--text-muted)]'}`}>
-                {l.is_cached
-                  ? (l.cache_saved_usd > 0 ? `+ saved $${l.cache_saved_usd.toFixed(4)}` : '+ $0.00 cached')
-                  : `- $${l.cost_usd.toFixed(4)}`}
+                {l.status_code === 403
+                  ? <span className="text-red-400/90">{guardRule(l.error_message)} blocked</span>
+                  : l.is_cached
+                    ? (l.cache_saved_usd > 0 ? `+ saved $${l.cache_saved_usd.toFixed(4)}` : '+ $0.00 cached')
+                    : `- $${l.cost_usd.toFixed(4)}`}
               </p>
             </div>
             <div className="text-right shrink-0">
@@ -186,6 +217,43 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
   );
 }
 
+const RULE_LABEL: Record<string, string> = {
+  secrets: 'Secrets in prompt',
+  pii: 'PII detected',
+  injection: 'Injection / jailbreak',
+  policy: 'Blocked',
+};
+
+function GuardrailsCard({ logs }: { logs: AuditLog[] }) {
+  const blocked = logs.filter((l) => l.status_code === 403);
+  const byRule = new Map<string, number>();
+  for (const l of blocked) {
+    const rule = guardRule(l.error_message);
+    byRule.set(rule, (byRule.get(rule) ?? 0) + 1);
+  }
+  return (
+    <ChartCard
+      title="Guardrails"
+      subtitle="Blocked before reaching the provider"
+      empty={blocked.length === 0}
+      emptyHint="Nothing blocked in the last 100 requests."
+    >
+      <div className="px-2 py-2">
+        <p className="text-[24px] font-bold text-white leading-none mb-3">
+          {blocked.length}
+          <span className="ml-2 text-[12px] font-medium text-[var(--text-muted)]">blocked</span>
+        </p>
+        {[...byRule.entries()].sort((a, b) => b[1] - a[1]).map(([rule, n]) => (
+          <div key={rule} className="flex items-center justify-between py-1.5 border-t border-[var(--border)] text-[13px]">
+            <span className="text-[var(--text-secondary)]">{RULE_LABEL[rule] ?? rule}</span>
+            <span className="text-red-400 font-medium">{n}</span>
+          </div>
+        ))}
+      </div>
+    </ChartCard>
+  );
+}
+
 const CONNECTABLE = new Set(Object.keys(providerDisplay));
 
 export default function AnalyticsDashboard() {
@@ -195,7 +263,7 @@ export default function AnalyticsDashboard() {
   const analytics = useQuery({ queryKey: ['analytics', days], queryFn: () => api.getAnalytics(days) });
   const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days) });
   const breakdown = useQuery({ queryKey: ['breakdown', days], queryFn: () => api.getBreakdown(days) });
-  const logs = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(15) });
+  const logs = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100) });
 
   const market = useQuery({ queryKey: ['pricing'], queryFn: fetchMarket, staleTime: 24 * 60 * 60 * 1000, retry: 1 });
   const providerKeys = useQuery({ queryKey: ['providers'], queryFn: () => api.listProviders() });
@@ -398,6 +466,7 @@ export default function AnalyticsDashboard() {
                   <TokensChart days={days} rows={actRows} />
                   <CachingChart days={days} rows={actRows} />
                   <SpeedChart days={days} rows={actRows} />
+                  <GuardrailsCard logs={logs.data ?? []} />
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
