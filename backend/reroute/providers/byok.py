@@ -167,7 +167,8 @@ async def _invalidate_handler(redis: Redis, registry, session_factory):
     async for msg in pubsub.listen():
         if msg["type"] != "message":
             continue
-        user_id = msg["data"]
+        data = msg["data"]
+        user_id = data.decode() if isinstance(data, bytes) else data  # decode_responses=False
         # Rebuild from DB on next resolve_user call (lazy) or eagerly:
         async with session_factory() as db:
             await _warm_instance_cache(redis, user_id, registry, db)
