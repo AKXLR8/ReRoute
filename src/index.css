@@ -1,0 +1,362 @@
+@import "tailwindcss";
+
+:root {
+  --bg-base: #000000;
+  --bg-secondary: #060606;
+  --bg-card: #0A0A0A;
+  --bg-card-hover: #0E0E0E;
+  --border: rgba(240,237,232,0.08);
+  --border-strong: rgba(240,237,232,0.14);
+  --hover: rgba(240,237,232,0.06);
+  --active: rgba(240,237,232,0.08);
+
+  --accent: #4FAF69;
+  --accent-dim: rgba(79,175,105,0.12);
+  --warning: #D6A84C;
+  --warning-dim: rgba(214,168,76,0.12);
+  --purple: #8B5CF6;
+  --purple-dim: rgba(139,92,246,0.12);
+  --danger: #E5534B;
+  --danger-dim: rgba(229,83,75,0.12);
+  --blue: #4493f8;
+  --blue-dim: rgba(68,147,248,0.12);
+  --pink: #EC4899;
+  --pink-dim: rgba(236,72,153,0.12);
+  --cyan: #06B6D4;
+
+  --text-primary: #F0EDE8;
+  --text-secondary: #A8A6A1;
+  --text-muted: #8B8B8B;
+  --text-faint: #6B6B6B;
+
+  --page-max: 1280px;
+  --page-pad: 28px;
+  --grid-gap: 20px;
+  --radius-card: 12px;
+  --radius-btn: 8px;
+  --radius-pill: 9999px;
+
+  /* ponytail: aliases — Layout/ui.tsx reference these names, map to tokens above */
+  --border-default: var(--border);
+  --border-focus: var(--accent);
+  --bg-raised: var(--bg-card);
+  --bg-overlay: rgba(255,255,255,0.04);
+  --bg-muted: rgba(255,255,255,0.06);
+  --bg-hover: var(--hover);
+  --bg-sidebar: var(--bg-secondary);
+  --green: var(--accent);
+  --green-10: var(--accent-dim);
+  --red: var(--danger);
+  --red-10: var(--danger-dim);
+  --yellow: var(--warning);
+  --yellow-10: var(--warning-dim);
+  --blue-10: var(--blue-dim);
+  --topbar-h: 56px;
+}
+
+/* ponytail: no global * margin/padding reset — Tailwind preflight already
+   resets, and an unlayered * rule beats @layer utilities site-wide */
+* { -webkit-tap-highlight-color: transparent; }
+
+html { font-size: 16px; scroll-behavior: smooth; }
+html, body { width: 100%; max-width: 100%; overflow-x: hidden; }
+section[id] { scroll-margin-top: 72px; }
+
+/* ─── Global page container: single content grid for navbar, hero, sections, footer ─── */
+.container-x {
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+@media (min-width: 640px) {
+  .container-x { padding-left: 24px; padding-right: 24px; }
+}
+@media (min-width: 1024px) {
+  .container-x { padding-left: 32px; padding-right: 32px; }
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  background: #000;
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+table { border-collapse: separate; border-spacing: 0; width: 100%; }
+.tabular-nums { font-variant-numeric: tabular-nums; }
+
+.font-mono { font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; }
+
+/* ─── Card ─── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: none;
+  transition: border-color 0.2s ease;
+}
+.card:hover {
+  border-color: var(--border-strong);
+}
+
+/* ─── Brand logos: flip dark wordmarks to white for dark surfaces ─── */
+.logo-white { filter: brightness(0) invert(1); }
+
+/* ═══════════════════════════════════════════════════
+   GITHUB PRIMER THEME (landing) — modern AI SaaS, dark.
+   Scoped under .storybook so the dashboard app is unaffected.
+   ═══════════════════════════════════════════════════ */
+.storybook {
+  --sb-ink: #F5F5F5;
+  --sb-muted: #A3A3A3;
+  --sb-faint: #6B6B6B;
+  --sb-cream: #1F1A19;
+  --sb-grass: #D6D3CF;
+  --sb-grass-deep: #D6D3CF;
+  --sb-sun: #D6D3CF;
+  --sb-navy: #171412;
+  --sb-card: #26211F;
+  --sb-line: rgba(255,255,255,0.10);
+  font-family: 'Geist', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--sb-ink);
+  background: transparent;
+}
+.storybook h1, .storybook h2, .storybook h3 { font-family: 'Geist', 'Inter', "Segoe UI", Helvetica, Arial, sans-serif; font-weight: 600; letter-spacing: -0.03em; }
+
+/* akashml card: warm near-black, hairline outline-1, subtle spotlight glow */
+.sticker {
+  background:
+    radial-gradient(120% 55% at 50% 100%, rgba(60,90,149,0.10) 0%, rgba(0,0,0,0) 60%),
+    #1F1A19;
+  outline: 1px solid rgba(255,255,255,0.10);
+  outline-offset: -1px;
+  border-radius: 14px;
+  box-shadow: 0 1px 2px -1px rgba(0,0,0,0.10), 0 1px 3px 0 rgba(0,0,0,0.10);
+  transition: outline-color 0.18s ease;
+}
+.sticker-hover:hover { transform: none; outline-color: rgba(255,255,255,0.16); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5); }
+
+/* tactile grain overlay for the premium dark section */
+.noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* akashml button: neutral-50 on dark, neutral-900 on light */
+.btn-chunky {
+  border-radius: 8px;
+  outline: 1px solid rgba(255,255,255,0.14);
+  outline-offset: -1px;
+  box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+  transition: background-color 0.15s ease;
+}
+.btn-chunky:hover { transform: none; background-color: #E4E1DD; box-shadow: none; }
+
+/* ponytail: glow halo on the animated dashboard chart lines */
+.recharts-curve { filter: drop-shadow(0 0 6px rgba(0, 210, 160, 0.5)); }
+.btn-chunky:active { transform: none; box-shadow: none; }
+
+/* accent text — editorial serif green highlight */
+.marker {
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  color: #4FAF69;
+  font-family: 'Cormorant Garamond', 'Georgia', serif;
+  font-style: italic;
+}
+
+/* editorial serif font — re-skinned to akashml: Geist sans, semibold, tight */
+.font-editorial {
+  font-family: 'Geist', 'Inter', -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+/* ─── Glass Card ─── */
+.glass {
+  background: rgba(17,19,24,0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+/* ─── KPI ─── */
+.kpi-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+.kpi-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+.kpi-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+}
+.kpi-trend.up { background: var(--accent-dim); color: var(--accent); }
+.kpi-trend.down { background: var(--danger-dim); color: var(--danger); }
+.kpi-trend.flat { background: var(--warning-dim); color: var(--warning); }
+
+/* ─── Pill Tab ─── */
+.pill-tab {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  transition: all 0.15s ease;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.pill-tab:hover { color: var(--text-secondary); background: var(--hover); }
+.pill-tab.active {
+  color: var(--text-primary);
+  background: var(--blue-dim);
+  border-color: rgba(79,142,247,0.2);
+}
+
+/* ─── Skeleton ─── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-card-hover) 50%, var(--bg-card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: var(--radius-card);
+}
+
+/* ─── Glow ─── */
+@keyframes glowPulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.8; }
+}
+.chart-glow {
+  filter: drop-shadow(0 0 8px rgba(139,92,246,0.3));
+}
+
+/* ─── Stat ─── */
+.stat-number {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ─── Sidebar scroll ─── */
+.sidebar-scroll::-webkit-scrollbar { width: 3px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 2px; }
+
+/* ─── Gradient Text ─── */
+.gradient-text {
+  background: linear-gradient(135deg, #00D2A0, #4F8EF7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ─── Grid Background ─── */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+/* ─── Glow Effect ─── */
+.glow-accent {
+  box-shadow: 0 0 60px rgba(0,210,160,0.15);
+}
+.glow-blue {
+  box-shadow: 0 0 60px rgba(79,142,247,0.15);
+}
+.glow-purple {
+  box-shadow: 0 0 60px rgba(139,92,246,0.15);
+}
+
+/* ─── Animated Gradient ─── */
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.animated-gradient {
+  background: linear-gradient(135deg, #00D2A0, #4F8EF7, #8B5CF6, #00D2A0);
+  background-size: 300% 300%;
+  animation: gradientShift 8s ease infinite;
+}
+
+/* ─── Floating Animation ─── */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(100%); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in { animation: slideIn 0.3s ease-out; }
+
+/* ─── Pulse Glow ─── */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 20px rgba(0,210,160,0.2); }
+  50% { box-shadow: 0 0 40px rgba(0,210,160,0.4); }
+}
+.animate-pulse-glow {
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+/* ─── Feature Carousel ─── */
+@keyframes scroll-left {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+@keyframes scroll-right {
+  0% { transform: translateX(-50%); }
+  100% { transform: translateX(0); }
+}
+.feature-row {
+  display: flex;
+  gap: 16px;
+  width: max-content;
+}
+.feature-row.scroll-left {
+  animation: scroll-left 35s linear infinite;
+}
+.feature-row.scroll-right {
+  animation: scroll-right 35s linear infinite;
+}
+.feature-row:hover {
+  animation-play-state: paused;
+}
