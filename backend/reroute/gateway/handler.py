@@ -413,6 +413,10 @@ class GatewayHandler:
         """Failures and guard blocks must still appear in activity/analytics.
         Failures never fail the response."""
         try:
+            # a failed insert elsewhere leaves the session mid-transaction; without
+            # clearing it this commit raises PendingRollbackError and the request
+            # vanishes from every dashboard graph
+            await db.rollback()
             db.add(
                 AuditLog(
                     user_id=_uid(auth),
