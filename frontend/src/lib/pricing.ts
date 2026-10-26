@@ -125,18 +125,51 @@ async function fetchOrProviders(): Promise<Map<string, { name: string; slug: str
   return map;
 }
 
+const MARKET_KEY = 'market_cache_v1';
+const MARKET_TTL = 24 * 60 * 60 * 1000;
+
+interface StoredMarket {
+  at: number;
+  entries: PriceEntry[];
+  newest: NewestModel[];
+  providers: [string, { name: string; slug: string }][];
+}
+
 export async function fetchMarket(): Promise<MarketData> {
+  // ponytail: localStorage, not a service — a reload shouldn't re-pull 3 MB of
+  // feeds and re-parse them on the main thread.
+  try {
+    const raw = localStorage.getItem(MARKET_KEY);
+    if (raw) {
+      const c = JSON.parse(raw) as StoredMarket;
+      if (Date.now() - c.at < MARKET_TTL) {
+        return { entries: c.entries, newest: c.newest, providers: new Map(c.providers) };
+      }
+    }
+  } catch {
+    // corrupt or full storage → fall through to a fresh fetch
+  }
+
   const [lite, or, prov] = await Promise.allSettled([fetchLiteLLM(), fetchOpenRouter(), fetchOrProviders()]);
   if (lite.status === 'rejected' && or.status === 'rejected') throw lite.reason;
   const entries = [
     ...(lite.status === 'fulfilled' ? lite.value : []),
     ...(or.status === 'fulfilled' ? or.value.entries : []),
   ];
-  return {
+  const data: MarketData = {
     entries,
     newest: or.status === 'fulfilled' ? or.value.newest : [],
     providers: prov.status === 'fulfilled' ? prov.value : new Map(),
   };
+  try {
+    localStorage.setItem(
+      MARKET_KEY,
+      JSON.stringify({ at: Date.now(), entries: data.entries, newest: data.newest, providers: [...data.providers] }),
+    );
+  } catch {
+    // quota exceeded → still return this fetch's data
+  }
+  return data;
 }
 
 /* Match a gateway model id against feed keys (many are provider-prefixed). */
