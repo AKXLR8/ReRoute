@@ -13,6 +13,7 @@ const AnalyticsDashboard = lazy(() => import('./pages/AnalyticsDashboard'));
 const SettingsPage = lazy(() => import('./pages/Settings'));
 const LogsPage = lazy(() => import('./pages/Logs'));
 const UsersPage = lazy(() => import('./pages/Users'));
+const Docs = lazy(() => import('./pages/Docs'));
 
 const PageFallback = (
   <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg-base)' }}>
@@ -105,7 +106,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<PublicPage><Landing /></PublicPage>} />
           <Route path="/models" element={<PublicPage><Models /></PublicPage>} />
-          <Route path="/docs" element={<PublicPage><div className="container-x py-24 text-center"><h1 className="text-3xl font-bold text-white">Documentation</h1><p className="text-[#6B7280] mt-3">Coming soon.</p></div></PublicPage>} />
+          <Route path="/docs" element={<PublicPage><Docs /></PublicPage>} />
           <Route path="/dashboard/*" element={<DashboardShell />} />
         </Routes>
       </Suspense>

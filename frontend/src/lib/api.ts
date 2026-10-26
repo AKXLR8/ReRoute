@@ -1,7 +1,7 @@
 
 import { accessToken, clearSession, refreshSession } from './auth';
 
-const API_URL = 'https://re-route-pi.vercel.app';
+export const API_URL = 'https://re-route-pi.vercel.app';
 
 interface ApiError {
   status: number;
@@ -212,7 +212,32 @@ export interface UserInfo {
   created_at: string;
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface ApiKeyCreated extends ApiKey {
+  key: string;
+}
+
 export const api = {
+  // Gateway API keys (session-only: a key cannot manage keys)
+  listApiKeys: () => request<ApiKey[]>('/auth/api-keys'),
+
+  createApiKey: (name: string) =>
+    request<ApiKeyCreated>('/auth/api-keys', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    }),
+
+  revokeApiKey: (id: string) =>
+    request<void>(`/auth/api-keys/${id}`, { method: 'DELETE' }),
+
   // Per-user BYOK
   listProviders: () => request<ProviderKey[]>('/auth/providers'),
 

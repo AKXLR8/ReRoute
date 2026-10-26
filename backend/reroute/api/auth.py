@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth.accounts import (
     authenticate,
+    hash_token,
     new_refresh_row,
     revoke_all_sessions,
     rotate_refresh,
@@ -33,13 +34,17 @@ from ..auth.accounts import (
 from ..auth.accounts import (
     logout as logout_token,
 )
-from ..auth.auth import AuthContext, create_access_token, get_current_user
+from ..auth.auth import API_KEY_PREFIX, AuthContext, create_access_token, get_current_user
 from ..auth.passwords import check_policy, hash_password, verify_password
 from ..config import Settings, get_settings
 from ..database import get_db
+from ..models.api_key import ApiKey
 from ..models.user import User
 from ..providers import byok
 from ..schemas.auth import (
+    ApiKeyCreate,
+    ApiKeyCreated,
+    ApiKeyRead,
     ChangePasswordRequest,
     GithubExchangeRequest,
     LoginRequest,
@@ -210,6 +215,93 @@ async def logout(body: LogoutRequest, db: AsyncSession = Depends(get_db)):
 @router.get("/me", response_model=SessionUser)
 async def me(auth: AuthContext = Depends(get_current_user)):
     return SessionUser(id=auth.user_id, email=auth.email, role=auth.role or "admin")
+
+
+# --- gateway API keys: the credential apps use to call /v1 ---
+#
+# Session-only by design: a leaked gateway key must not be able to mint more
+# keys or read the list, otherwise revoking it would be pointless.
+
+
+def _require_session(auth: AuthContext) -> uuid.UUID:
+    if not auth.user_id:
+        raise HTTPException(status_code=403, detail="Requires a signed-in account")
+    if auth.api_key_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Manage API keys from a signed-in session, not with an API key",
+        )
+    return uuid.UUID(auth.user_id)
+
+
+def _api_key_read(row: ApiKey) -> ApiKeyRead:
+    return ApiKeyRead(
+        id=str(row.id),
+        name=row.name,
+        key_prefix=row.key_prefix,
+        created_at=row.created_at,
+        last_used_at=row.last_used_at,
+        revoked_at=row.revoked_at,
+    )
+
+
+@router.get("/api-keys", response_model=list[ApiKeyRead])
+async def list_api_keys(
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = _require_session(auth)
+    rows = (
+        await db.execute(
+            select(ApiKey)
+            .where(ApiKey.user_id == user_id)
+            .order_by(ApiKey.created_at.desc())
+        )
+    ).scalars().all()
+    return [_api_key_read(r) for r in rows]
+
+
+@router.post("/api-keys", response_model=ApiKeyCreated, status_code=status.HTTP_201_CREATED)
+async def create_api_key(
+    body: ApiKeyCreate,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mint a key. The raw value is returned exactly once."""
+    user_id = _require_session(auth)
+    raw = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    row = ApiKey(
+        user_id=user_id,
+        name=body.name.strip(),
+        key_hash=hash_token(raw),
+        key_prefix=raw[: len(API_KEY_PREFIX) + 4],
+    )
+    db.add(row)
+    await db.commit()
+    await db.refresh(row)
+    log.info("api key created user=%s key=%s", auth.email, row.id)
+    return ApiKeyCreated(key=raw, **_api_key_read(row).model_dump())
+
+
+@router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_key(
+    key_id: uuid.UUID,
+    auth: AuthContext = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = _require_session(auth)
+    row = (
+        await db.execute(
+            select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == user_id)
+        )
+    ).scalars().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="API key not found")
+    if row.revoked_at is None:
+        row.revoked_at = datetime.now(UTC)
+        await db.commit()
+        log.info("api key revoked user=%s key=%s", auth.email, row.id)
+    return None
 
 
 # --- per-user BYOK: every signed-in account manages its own provider keys ---

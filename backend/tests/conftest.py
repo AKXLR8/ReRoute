@@ -66,13 +66,13 @@ class FakeDb:
         self.commits += 1
 
     async def refresh(self, obj):
-        if isinstance(obj, User):
-            if obj.id is None:
-                obj.id = uuid.uuid4()
-            if obj.created_at is None:
-                obj.created_at = datetime.now(UTC)
-            if obj.updated_at is None:
-                obj.updated_at = datetime.now(UTC)
+        if getattr(obj, "id", None) is None:
+            obj.id = uuid.uuid4()
+        for attr in ("created_at", "updated_at"):
+            if getattr(obj, attr, None) is None:
+                setattr(obj, attr, datetime.now(UTC))
+        if isinstance(obj, User) and obj.role is None:
+            obj.role = "member"
 
 
 _default_hash: str | None = None

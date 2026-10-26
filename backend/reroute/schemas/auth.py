@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..auth.accounts import norm_email
 
@@ -36,6 +36,25 @@ class GithubExchangeRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+
+
+class ApiKeyRead(BaseModel):
+    id: str
+    name: str
+    key_prefix: str
+    created_at: datetime
+    last_used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+
+class ApiKeyCreated(ApiKeyRead):
+    """The only time the raw key is returned - it is not recoverable after this."""
+
+    key: str
 
 
 class LogoutRequest(BaseModel):
