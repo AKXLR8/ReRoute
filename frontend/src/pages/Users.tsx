@@ -5,7 +5,8 @@ import { storedUser } from '../lib/auth';
 import { signOut } from '../lib/nav';
 import { DashPage } from '../components/dashboard/DashPage';
 import { ChartCard } from '../components/dashboard/ChartCard';
-import { Plus, Trash2, KeyRound, X } from 'lucide-react';
+import { useEscape } from '../lib/utils';
+import { Check, Plus, Trash2, KeyRound, X } from 'lucide-react';
 
 const inputCls =
   'h-8 px-3 rounded-lg text-[12px] text-[var(--text-primary)] outline-none bg-black border border-[var(--border)] focus:border-[var(--accent)] transition-colors';
@@ -45,6 +46,7 @@ export default function UsersPage() {
   const [resetConfirm, setResetConfirm] = useState('');
   const [resetBusy, setResetBusy] = useState(false);
   const [resetErr, setResetErr] = useState('');
+  const [resetOk, setResetOk] = useState(false);
 
   const create = async () => {
     if (busy) return;
@@ -78,6 +80,7 @@ export default function UsersPage() {
     setResetPw('');
     setResetConfirm('');
     setResetErr('');
+    setResetOk(false);
   };
 
   const confirmResetPassword = async () => {
@@ -88,8 +91,8 @@ export default function UsersPage() {
     setResetErr('');
     try {
       await api.resetUserPassword(resetModal.user.id, resetPw);
-      window.alert(`Password updated for ${resetModal.user.email}. Their sessions were signed out.`);
-      setResetModal({ user: null, open: false });
+      setResetOk(true);
+      window.setTimeout(() => setResetModal({ user: null, open: false }), 1600);
     } catch (e) {
       setResetErr(detailOf(e));
     } finally {
@@ -102,7 +105,10 @@ export default function UsersPage() {
     setResetPw('');
     setResetConfirm('');
     setResetErr('');
+    setResetOk(false);
   };
+
+  useEscape(resetModal.open, closeResetModal);
 
   const remove = async (u: UserInfo) => {
     if (!window.confirm(`Delete ${u.email}? This cannot be undone.`)) return;
@@ -234,6 +240,7 @@ export default function UsersPage() {
                         </button>
                         <button
                           onClick={() => resetPassword(u)}
+                          aria-label={`Reset password for ${u.email}`}
                           title="Reset password (signs them out everywhere)"
                           className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--hover)] transition-colors border border-[var(--border)]"
                         >
@@ -242,6 +249,7 @@ export default function UsersPage() {
                         <button
                           onClick={() => remove(u)}
                           disabled={u.id === me?.id}
+                          aria-label={`Delete ${u.email}`}
                           title={u.id === me?.id ? 'You cannot delete yourself' : 'Delete account'}
                           className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--danger)] hover:bg-[var(--hover)] transition-colors border border-[var(--border)] disabled:opacity-30 disabled:pointer-events-none"
                         >
@@ -272,7 +280,7 @@ export default function UsersPage() {
 
         {resetModal.open && resetModal.user && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={closeResetModal}>
-            <div className="w-full max-w-sm mx-4 p-6 rounded-2xl shadow-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
+            <div role="dialog" aria-modal="true" aria-label="Reset password" className="w-full max-w-sm mx-4 p-6 rounded-2xl shadow-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold text-white">Reset Password</h3>
                 <button onClick={closeResetModal} className="text-[var(--text-muted)] hover:text-white transition-colors">
@@ -280,6 +288,11 @@ export default function UsersPage() {
                 </button>
               </div>
               <p className="text-sm text-[#6B7280] mb-4">New password for <strong>{resetModal.user.email}</strong> (signs them out everywhere)</p>
+              {resetOk && (
+                <p className="flex items-center gap-2 text-[12px] mb-3" style={{ color: 'var(--accent)' }}>
+                  <Check className="w-4 h-4" /> Password updated — their sessions were signed out.
+                </p>
+              )}
               <div className="space-y-3">
                 <input
                   type="password"
@@ -304,9 +317,11 @@ export default function UsersPage() {
                 {resetErr && <p className="text-xs text-[var(--danger)]">{resetErr}</p>}
               </div>
               <div className="flex gap-2 mt-4">
-                <button onClick={closeResetModal} className="flex-1 h-10 rounded-lg text-sm font-medium text-white border border-[var(--border)] hover:bg-[var(--hover)] transition-colors">Cancel</button>
-                <button onClick={confirmResetPassword} disabled={resetBusy || resetPw.length < 7} className="flex-1 h-10 rounded-lg text-sm font-medium text-black transition-all disabled:opacity-40 disabled:pointer-events-none" style={{ background: '#00D2A0' }}>
-                  {resetBusy ? 'Resetting…' : 'Reset Password'}
+                <button onClick={closeResetModal} className="flex-1 h-10 rounded-lg text-sm font-medium text-white border border-[var(--border)] hover:bg-[var(--hover)] transition-colors">
+                  {resetOk ? 'Done' : 'Cancel'}
+                </button>
+                <button onClick={confirmResetPassword} disabled={resetBusy || resetOk || resetPw.length < 7} className="flex-1 h-10 rounded-lg text-sm font-medium text-black transition-all disabled:opacity-40 disabled:pointer-events-none" style={{ background: '#00D2A0' }}>
+                  {resetOk ? 'Updated' : resetBusy ? 'Resetting…' : 'Reset Password'}
                 </button>
               </div>
             </div>

@@ -8,7 +8,8 @@ import { DashPage } from '../components/dashboard/DashPage';
 import { ChartCard } from '../components/dashboard/ChartCard';
 import { CopyField } from '../components/ui/CopyField';
 import { CodeSnippet } from '../components/ui/CodeSnippet';
-import { Eye, EyeOff, KeyRound, Trash2, TriangleAlert, X } from 'lucide-react';
+import { timeAgo, useEscape } from '../lib/utils';
+import { Eye, EyeOff, KeyRound, Plus, Trash2, TriangleAlert, X } from 'lucide-react';
 
 /* Self-service password change — proves current password, rotates every session */
 function Password() {
@@ -77,6 +78,20 @@ function Providers() {
     open: false,
   });
 
+  // closing the form also drops the ?add=1 deep link so a reload starts closed
+  const closeForm = () => {
+    setOpen(false);
+    setErr('');
+    const u = new URL(window.location.href);
+    if (u.searchParams.has('add')) {
+      u.searchParams.delete('add');
+      window.history.replaceState({}, '', u);
+    }
+  };
+
+  useEscape(open, closeForm);
+  useEscape(disconnectModal.open, () => setDisconnectModal({ provider: null, open: false }));
+
   const { data, refetch, isError, error } = useQuery({
     queryKey: ['providers'],
     queryFn: () => api.listProviders(),
@@ -107,7 +122,7 @@ function Providers() {
       await api.connectProvider(provider, apiKey.trim(), baseUrl.trim() || undefined);
       setApiKey('');
       setBaseUrl('');
-      setOpen(false);
+      closeForm();
       await refetch();
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e);
@@ -151,6 +166,13 @@ function Providers() {
           <p className="text-[12px] text-[var(--text-muted)] mt-1 max-w-[340px] leading-relaxed">
             Connect OpenAI, Anthropic, Groq… to start routing through your own accounts — usage and cost land in this dashboard.
           </p>
+          <button
+            onClick={() => setOpen(true)}
+            className="mt-4 h-9 px-4 rounded-lg text-[13px] font-semibold text-white transition-all hover:opacity-90 active:scale-[0.98]"
+            style={{ background: 'var(--purple)' }}
+          >
+            Connect a provider key
+          </button>
         </div>
       ) : (
         <div className="flex items-center gap-2 flex-wrap">
@@ -172,6 +194,12 @@ function Providers() {
               </button>
             </span>
           ))}
+          <button
+            onClick={() => setOpen(true)}
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-medium border border-dashed border-[var(--border-strong)] text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors"
+          >
+            <Plus className="w-3 h-3" /> Add key
+          </button>
         </div>
       )}
 
@@ -250,7 +278,7 @@ function Providers() {
               {busy ? 'Verifying…' : 'Connect key'}
             </button>
             <button
-              onClick={() => { setOpen(false); setErr(''); }}
+              onClick={closeForm}
               className="h-9 px-4 rounded-lg text-[13px] font-medium text-[var(--text-muted)] border border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--text-primary)] transition-colors"
             >
               Cancel
@@ -261,7 +289,7 @@ function Providers() {
 
       {disconnectModal.open && disconnectModal.provider && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60" onClick={closeDisconnectModal}>
-          <div className="w-full max-w-sm mx-4 p-6 rounded-2xl shadow-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="Disconnect provider" className="w-full max-w-sm mx-4 p-6 rounded-2xl shadow-2xl" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-white">Disconnect provider</h3>
               <button onClick={closeDisconnectModal} className="text-[var(--text-muted)] hover:text-white transition-colors">
@@ -286,15 +314,6 @@ function Providers() {
 
 /* Gateway API keys - what apps use to call ReRoute. Session-only management:
    a leaked key can call /v1 but cannot mint or list keys. */
-function ago(iso: string | null): string {
-  if (!iso) return 'never';
-  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
 function GatewayKeys() {
   const { data, refetch } = useQuery({ queryKey: ['api-keys'], queryFn: () => api.listApiKeys() });
   const [createOpen, setCreateOpen] = useState(false);
@@ -314,6 +333,10 @@ function GatewayKeys() {
     setErr('');
     setName('');
   };
+
+  // the reveal step is not Escape-dismissable - that would lose the only copy of the key
+  useEscape(createOpen && !created, closeCreate);
+  useEscape(!!revokeTarget, () => setRevokeTarget(null));
 
   const create = async () => {
     if (busy || !name.trim()) return;
@@ -393,9 +416,9 @@ function GatewayKeys() {
                   <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-[var(--text-muted)] flex-wrap">
                     <code className="font-mono">{k.key_prefix}••••</code>
                     <span className="text-[var(--text-faint)]">·</span>
-                    <span>last used {ago(k.last_used_at)}</span>
+                    <span>last used {timeAgo(k.last_used_at)}</span>
                     <span className="text-[var(--text-faint)]">·</span>
-                    <span>created {ago(k.created_at)}</span>
+                    <span>created {timeAgo(k.created_at)}</span>
                   </div>
                 </div>
                 {!k.revoked_at && (
@@ -416,6 +439,9 @@ function GatewayKeys() {
       {createOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={created ? undefined : closeCreate}>
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={created ? 'Copy your API key' : 'Create API key'}
             className="w-full max-w-md p-6 rounded-2xl shadow-2xl"
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
             onClick={(e) => e.stopPropagation()}
@@ -505,6 +531,9 @@ function GatewayKeys() {
       {revokeTarget && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4" onClick={() => setRevokeTarget(null)}>
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Revoke API key"
             className="w-full max-w-sm p-6 rounded-2xl shadow-2xl"
             style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
             onClick={(e) => e.stopPropagation()}

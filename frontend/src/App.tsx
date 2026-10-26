@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import TopNav from './components/TopNav';
 import { ArrowRight } from 'lucide-react';
 import { bootSession, exchangeGithub, storedUser, type SessionUser } from './lib/auth';
@@ -14,6 +14,15 @@ const SettingsPage = lazy(() => import('./pages/Settings'));
 const LogsPage = lazy(() => import('./pages/Logs'));
 const UsersPage = lazy(() => import('./pages/Users'));
 const Docs = lazy(() => import('./pages/Docs'));
+
+/* a route change starts at the top - browser scroll position otherwise leaks across pages */
+function ScrollToTop() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.documentElement.scrollTop = 0;
+  }, [pathname]);
+  return null;
+}
 
 const PageFallback = (
   <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg-base)' }}>
@@ -102,6 +111,7 @@ export default function App() {
   return (
     <>
       <ToastInitializer />
+      <ScrollToTop />
       <Suspense fallback={PageFallback}>
         <Routes>
           <Route path="/" element={<PublicPage><Landing /></PublicPage>} />

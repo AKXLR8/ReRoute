@@ -18,6 +18,7 @@ import { NewestModels } from '../components/dashboard/NewestModels';
 import { PriceCompareModal } from '../components/dashboard/PriceCompareModal';
 import { ErrorBoundary } from '../components/dashboard/ErrorBoundary';
 import { cheapestByProvider, entryUrl, fetchMarket, fmtUsd, isFree, modelUrl, pricesFor, providerUrl, registryName, type PriceEntry } from '../lib/pricing';
+import { timeAgo } from '../lib/utils';
 
 const DARK_FACE = {
   background: 'linear-gradient(160deg,#18181B 0%,#0B0B0C 100%)',
@@ -176,7 +177,7 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
       {logs.length === 0 && <p className="py-6 text-[13px] text-[var(--text-muted)]">No requests yet.</p>}
       {logs.slice(0, 8).map((l, i) => {
         const t = new Date(l.timestamp);
-        const when = `${t.toLocaleDateString('en-US', { weekday: 'long' })} ${t.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+        const when = t.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
         return (
           <div key={l.id ?? i} className="flex items-center justify-between gap-3 py-3.5 border-t border-[var(--border)]">
             <div className="min-w-0">
@@ -201,7 +202,7 @@ function RecentList({ logs }: { logs: AuditLog[] }) {
               </p>
             </div>
             <div className="text-right shrink-0">
-              <p className="text-[12px] text-[var(--text-muted)]">{when}</p>
+              <p className="text-[12px] text-[var(--text-muted)]" title={when}>{timeAgo(l.timestamp)}</p>
               <p className="text-[11px] text-[var(--text-faint)]">
                 {Math.round(l.latency_ms)}ms
                 {l.ttft_ms != null && ` · ${Math.round(l.ttft_ms)}ms TTFT`}
@@ -259,6 +260,7 @@ const CONNECTABLE = new Set(Object.keys(providerDisplay));
 export default function AnalyticsDashboard() {
   const [days, setDays] = useState(30);
   const [compare, setCompare] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // ponytail: 10s poll, no staleness — new gateway traffic shows up while watching.
   const live = { staleTime: 0, refetchInterval: 10_000, refetchOnWindowFocus: 'always' } as const;
@@ -280,10 +282,19 @@ export default function AnalyticsDashboard() {
   const err = analytics.error ?? activity.error ?? breakdown.error ?? logs.error;
   const isError = analytics.isError || activity.isError || breakdown.isError || logs.isError;
   const unauthorized = !!err && /401/.test(String(err));
-  const refetchAll = () => { analytics.refetch(); activity.refetch(); breakdown.refetch(); logs.refetch(); };
+  // local flag so the 10s background poll never spins the button on its own
+  const refetchAll = async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([analytics.refetch(), activity.refetch(), breakdown.refetch(), logs.refetch()]);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const feed = market.data?.entries;
   const connected = useMemo(() => new Set((providerKeys.data ?? []).map((p) => p.provider)), [providerKeys.data]);
+  const hasKeys = (providerKeys.data?.length ?? 0) > 0;
   const cheapestBy = useMemo(() => (feed ? cheapestByProvider(feed) : null), [feed]);
 
   /* Cheapest *paid* model per connectable provider: free feed entries are
@@ -380,11 +391,15 @@ export default function AnalyticsDashboard() {
       sub="Welcome back — here's your spend."
       actions={
         <>
-          <button onClick={refetchAll} className="h-9 px-4 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--hover)] transition-colors">
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          <button
+            onClick={refetchAll}
+            disabled={refreshing}
+            className="h-9 px-4 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--hover)] transition-colors disabled:opacity-60 disabled:pointer-events-none"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> {refreshing ? 'Refreshing' : 'Refresh'}
           </button>
           <Link to="/dashboard/settings?add=1" className="h-9 px-4 rounded-lg flex items-center gap-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90" style={{ background: 'var(--purple)' }}>
-            <KeyRound className="w-3.5 h-3.5" /> Add your key
+            <KeyRound className="w-3.5 h-3.5" /> {hasKeys ? 'Manage keys' : 'Add your key'}
           </Link>
         </>
       }
@@ -461,8 +476,8 @@ export default function AnalyticsDashboard() {
                   </div>
                 </div>
 
-                <ActivityChart days={days} rows={actRows} title="Balance over time" action={<Segmented value={days} onChange={setDays} />} />
-                <CostChart rows={rows} action={<Segmented value={days} onChange={setDays} />} />
+                <ActivityChart days={days} rows={actRows} title="Usage over time" />
+                <CostChart rows={rows} />
 
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
                   <TokensChart days={days} rows={actRows} />

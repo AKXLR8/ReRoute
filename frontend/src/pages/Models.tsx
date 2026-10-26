@@ -1,6 +1,7 @@
 ﻿import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Search, Cpu, ArrowUpDown, ExternalLink, RefreshCw } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { Search, Cpu, ArrowUpDown, ExternalLink, RefreshCw, X } from 'lucide-react';
 import { api, displayName, displayColor } from '../lib/api';
 import { fetchMarket, modelUrl, providerUrl } from '../lib/pricing';
 import { brandLogo, filteredLogo, wideLogo } from '../lib/logos';
@@ -75,7 +76,7 @@ export default function Models() {
           {isError && (
             <div className="card p-6 mt-6 text-center">
               <p className="text-sm font-medium text-white mb-1">Could not load the model registry</p>
-              <p className="text-xs text-[var(--text-muted)] mb-4">Is the backend running? (expected at http://localhost:8000)</p>
+              <p className="text-xs text-[var(--text-muted)] mb-4">Could not reach the gateway API — retry in a moment.</p>
               <button onClick={() => refetch()} className="h-9 px-4 rounded-lg text-[13px] font-medium text-black bg-[var(--accent)] hover:opacity-90 transition-opacity">
                 Retry
               </button>
@@ -86,13 +87,20 @@ export default function Models() {
             <>
               {/* Filters */}
               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 mt-6">
-                <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-[var(--border)] bg-[var(--bg-card)] flex-1 max-w-sm">
-                  <Search className="w-3.5 h-3.5 text-[var(--text-faint)]" />
+                <div className="flex items-center gap-2 h-8 px-3 rounded-lg border border-[var(--border)] focus-within:border-[var(--accent)] transition-colors bg-[var(--bg-card)] flex-1 max-w-sm">
+                  <Search className="w-3.5 h-3.5 text-[var(--text-faint)] shrink-0" />
                   <input
                     value={search} onChange={(e) => setSearch(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Escape' && setSearch('')}
                     placeholder="Search models..."
-                    className="flex-1 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)]"
+                    aria-label="Search models"
+                    className="flex-1 min-w-0 bg-transparent text-[12px] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-faint)]"
                   />
+                  {search && (
+                    <button onClick={() => setSearch('')} aria-label="Clear search" className="text-[var(--text-faint)] hover:text-[var(--text-primary)] transition-colors shrink-0">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 flex-wrap">
                   {allProviders.map((p) => (
@@ -138,9 +146,9 @@ export default function Models() {
                         </tr>
                       </thead>
                       <tbody>
-                        {isLoading && (
-                          <tr><td colSpan={3} className="px-4 py-8 text-center text-[12px] text-[var(--text-faint)]">Loading…</td></tr>
-                        )}
+                        {isLoading && [0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+                          <tr key={i}><td colSpan={3} className="px-4 py-2"><div className="skeleton h-[24px] rounded-md" /></td></tr>
+                        ))}
                         {!isLoading && filtered.map((m) => {
                         const url = urls.get(m.id);
                         return (
@@ -194,7 +202,15 @@ export default function Models() {
                       })}
                         {!isLoading && !isError && filtered.length === 0 && (
                           <tr><td colSpan={3} className="px-4 py-8 text-center text-[12px] text-[var(--text-faint)]">
-                            {models.length === 0 ? 'No models yet — connect a provider API key in Settings' : 'No models match your search.'}
+                            {models.length === 0 ? (
+                              <>
+                                No models yet —{' '}
+                                <Link to="/dashboard/settings" className="text-[var(--accent)] hover:underline">
+                                  connect a provider key
+                                </Link>
+                                .
+                              </>
+                            ) : 'No models match your search.'}
                           </td></tr>
                         )}
                       </tbody>

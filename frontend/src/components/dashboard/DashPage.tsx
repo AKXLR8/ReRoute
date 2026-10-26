@@ -3,12 +3,18 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ChevronDown, Settings as SettingsIcon } from 'lucide-react';
 import { signOut, visibleNavItems } from '../../lib/nav';
+import { storedUser } from '../../lib/auth';
+import { useEscape } from '../../lib/utils';
 
 export function TopBar() {
   const loc = useLocation();
+  const me = storedUser();
   const [acctOpen, setAcctOpen] = useState(false);
   const [hidden, setHidden] = useState(false);
   const lastY = useRef(0);
+
+  useEscape(acctOpen, () => setAcctOpen(false));
+  useEffect(() => setAcctOpen(false), [loc.pathname]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -56,14 +62,42 @@ export function TopBar() {
           <SettingsIcon className="w-4 h-4" />
         </Link>
         <div className="relative">
-          <button onClick={() => setAcctOpen(!acctOpen)} className="h-9 px-2.5 sm:px-3 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)] border border-[var(--border)] transition-colors">
-            Account <ChevronDown className="w-3.5 h-3.5" />
+          <button
+            onClick={() => setAcctOpen(!acctOpen)}
+            aria-haspopup="menu"
+            aria-expanded={acctOpen}
+            className="h-9 px-2.5 sm:px-3 rounded-lg flex items-center gap-2 text-[13px] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover)] border border-[var(--border)] transition-colors"
+          >
+            <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold uppercase shrink-0" style={{ background: 'var(--accent-dim)', color: 'var(--accent)' }}>
+              {(me?.email ?? 'A').slice(0, 1)}
+            </span>
+            <span className="hidden md:inline max-w-[140px] truncate">{me?.email ?? 'Account'}</span>
+            <ChevronDown className="w-3.5 h-3.5 shrink-0" />
           </button>
           {acctOpen && (
             <>
               <div className="fixed inset-0 z-40" onClick={() => setAcctOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 w-40 rounded-xl border border-[var(--border)] bg-[#0A0A0A] p-1 shadow-2xl z-50">
-                <button onClick={signOut} className="w-full h-9 px-3 rounded-lg text-[13px] text-left text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-white transition-colors">
+              <div
+                role="menu"
+                className="absolute right-0 top-full mt-2 w-56 rounded-xl border border-[var(--border)] bg-[#0A0A0A] p-1 shadow-2xl z-50"
+              >
+                <div className="px-3 py-2.5 mb-1 border-b border-[var(--border)]">
+                  <p className="text-[12px] font-medium text-[var(--text-primary)] truncate">{me?.email ?? 'Signed in'}</p>
+                  <p className="text-[11px] text-[var(--text-muted)] capitalize">{me?.role ?? 'member'}</p>
+                </div>
+                <Link
+                  to="/dashboard/settings"
+                  role="menuitem"
+                  onClick={() => setAcctOpen(false)}
+                  className="w-full h-9 px-3 rounded-lg flex items-center gap-2 text-[13px] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-white transition-colors"
+                >
+                  <SettingsIcon className="w-3.5 h-3.5" /> Settings
+                </Link>
+                <button
+                  role="menuitem"
+                  onClick={signOut}
+                  className="w-full h-9 px-3 rounded-lg text-[13px] text-left text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-white transition-colors"
+                >
                   Sign out
                 </button>
               </div>
@@ -79,11 +113,12 @@ const RANGES = [7, 30, 90];
 
 export function Segmented({ value, onChange }: { value: number; onChange: (v: number) => void }) {
   return (
-    <div className="flex items-center rounded-lg border border-[var(--border)] overflow-hidden shrink-0">
+    <div className="flex items-center rounded-lg border border-[var(--border)] overflow-hidden shrink-0" role="group" aria-label="Date range">
       {RANGES.map((o) => (
         <button
           key={o}
           onClick={() => onChange(o)}
+          aria-pressed={value === o}
           className={`h-7 px-2 sm:px-3 text-[12px] font-medium transition-colors ${value === o ? 'bg-white/10 text-white' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
         >
           {o} days
@@ -95,6 +130,10 @@ export function Segmented({ value, onChange }: { value: number; onChange: (v: nu
 
 /* shared dashboard page: black stage, pill TopBar, big heading + action buttons */
 export function DashPage({ title, sub, actions, children }: { title: string; sub?: string; actions?: ReactNode; children: ReactNode }) {
+  useEffect(() => {
+    document.title = `${title} · ReRouteAI`;
+  }, [title]);
+
   return (
     <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
       <TopBar />

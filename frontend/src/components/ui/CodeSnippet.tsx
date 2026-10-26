@@ -4,7 +4,7 @@ import { API_URL } from '../../lib/api';
 const LANGS = ['curl', 'python', 'node'] as const;
 type Lang = (typeof LANGS)[number];
 
-export function snippetFor(lang: Lang, apiKey: string, model = 'mercury-2'): string {
+function snippetFor(lang: Lang, apiKey: string, model = 'mercury-2'): string {
   const base = `${API_URL}/v1`;
   if (lang === 'curl') {
     return [
