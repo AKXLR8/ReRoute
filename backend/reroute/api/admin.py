@@ -62,6 +62,8 @@ async def list_audit_logs(
             "ttft_ms": lg.ttft_ms, "tokens_per_sec": lg.tokens_per_sec,
             "finish_reason": lg.finish_reason, "is_cached": lg.is_cached,
             "cache_saved_usd": lg.cache_saved_usd, "trace_id": lg.trace_id,
+            "fallback_from": lg.fallback_from, "retry_count": lg.retry_count,
+            "is_stream": lg.is_stream,
         }
         for lg in result.scalars().all()
     ]

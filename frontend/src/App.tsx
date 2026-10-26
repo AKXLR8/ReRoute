@@ -14,6 +14,7 @@ const SettingsPage = lazy(() => import('./pages/Settings'));
 const LogsPage = lazy(() => import('./pages/Logs'));
 const UsersPage = lazy(() => import('./pages/Users'));
 const Docs = lazy(() => import('./pages/Docs'));
+const Status = lazy(() => import('./pages/Status'));
 
 /* a route change starts at the top - browser scroll position otherwise leaks across pages */
 function ScrollToTop() {
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="/" element={<PublicPage><Landing /></PublicPage>} />
           <Route path="/models" element={<PublicPage><Models /></PublicPage>} />
           <Route path="/docs" element={<PublicPage><Docs /></PublicPage>} />
+          <Route path="/status" element={<PublicPage><Status /></PublicPage>} />
           <Route path="/dashboard/*" element={<DashboardShell />} />
         </Routes>
       </Suspense>

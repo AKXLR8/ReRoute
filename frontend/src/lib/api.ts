@@ -101,6 +101,9 @@ export interface AuditLog {
   is_cached: boolean;
   cache_saved_usd: number;
   trace_id: string | null;
+  fallback_from: string | null;
+  retry_count: number;
+  is_stream: boolean;
 }
 
 /* BYOK — connected provider key (write-only; server returns masked). */

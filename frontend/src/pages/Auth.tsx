@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Eye, EyeOff, Loader2, ShieldCheck, TriangleAlert } from 'lucide-react';
 import { needsSetup, login, register, type SessionUser } from '../lib/auth';
+import { API_URL } from '../lib/api';
 
 // lucide v1 dropped brand icons; GitHub mark (16px viewbox)
 function GithubMark({ className }: { className?: string }) {
@@ -190,7 +191,7 @@ export default function Auth({ onLogin }: { onLogin: (u: SessionUser) => void })
                 <div className="h-px flex-1" style={{ background: 'var(--border)' }} />
               </div>
               <a
-                href="/auth/github/authorize"
+                href={`${API_URL}/auth/github/authorize`}
                 className="w-full h-10 rounded-lg text-sm font-medium text-white transition-colors flex items-center justify-center gap-2 hover:bg-[var(--hover)]"
                 style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}
               >

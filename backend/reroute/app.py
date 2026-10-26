@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +22,11 @@ from .observability.telemetry import prometheus_endpoint, setup_telemetry, shutd
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
+
+# Public /status is cacheable: it is unauthenticated and must not become a free
+# probe amplifier against Postgres/Redis.
+_status_cache: dict[str, object] = {}
+_STATUS_TTL_SECONDS = 10
 
 
 async def request_size_limit_middleware(request: Request, call_next):
@@ -182,9 +189,9 @@ def create_app() -> FastAPI:
         description="Enterprise Multi-Provider LLM Gateway",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url=None if prod else "/docs",
+        docs_url="/docs",
         redoc_url=None if prod else "/redoc",
-        openapi_url=None if prod else "/openapi.json",
+        openapi_url="/openapi.json",
     )
 
     # Request size limit (runs first to reject oversized bodies early)
@@ -218,6 +225,75 @@ def create_app() -> FastAPI:
     @app.get("/health")
     async def health():
         return {"status": "ok"}
+
+    @app.get("/status", include_in_schema=False)
+    async def status(http_request: Request, db: AsyncSession = Depends(get_db)):
+        """Public status feed. Aggregate provider health only - no keys, URLs,
+        models, or user data (provider names are already on the landing page)."""
+        now = time.monotonic()
+        cached = _status_cache.get("body")
+        cached_at = now - float(_status_cache.get("at", 0))
+        if isinstance(cached, dict) and cached_at < _STATUS_TTL_SECONDS:
+            return cached
+
+        checks: dict[str, str] = {"api": "ok"}
+        try:
+            await db.execute(select(1))
+            checks["database"] = "ok"
+        except Exception:
+            checks["database"] = "error"
+
+        redis = getattr(http_request.app.state, "redis", None)
+        if redis is None:
+            checks["redis"] = "unknown"
+        else:
+            try:
+                await redis.ping()
+                checks["redis"] = "ok"
+            except Exception:
+                checks["redis"] = "error"
+
+        registry = getattr(http_request.app.state, "registry", None)
+        handler = getattr(http_request.app.state, "handler", None)
+        breakers = getattr(handler, "circuit_breakers", None)
+        circuits: dict = {}
+        if breakers is not None:
+            try:
+                circuits = await breakers.all_status()
+            except Exception:
+                circuits = {}
+
+        providers = []
+        if registry is not None:
+            for name, provider in sorted(registry.all().items()):
+                health = provider.health
+                circuit = str(circuits.get(name, {}).get("state", "closed"))
+                providers.append(
+                    {
+                        "name": name,
+                        "configured": bool(provider.api_key or name == "ollama"),
+                        "health": (
+                            "unknown"
+                            if not health.last_check
+                            else ("up" if health.available else "down")
+                        ),
+                        "circuit": circuit,
+                        "latency_ms": round(health.latency_ms, 1) if health.last_check else None,
+                    }
+                )
+
+        healthy = checks["database"] == "ok" and checks["redis"] != "error"
+        degraded = not healthy or any(
+            p["health"] == "down" or p["circuit"] == "open" for p in providers
+        )
+        body = {
+            "service": "degraded" if degraded else "ok",
+            "checks": checks,
+            "providers": providers,
+            "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        _status_cache.update(body=body, at=now)
+        return body
 
     @app.get("/")
     async def root():

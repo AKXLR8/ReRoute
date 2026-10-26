@@ -56,6 +56,20 @@ export default function Docs() {
         </p>
       </div>
 
+      <div className="mt-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px]">
+        <a
+          href={`${API_URL}/docs`}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[var(--accent)] underline underline-offset-2"
+        >
+          API reference
+        </a>
+        <Link to="/status" className="text-[var(--text-muted)] hover:text-white transition-colors">
+          Live status
+        </Link>
+      </div>
+
       <p className="text-[12px] text-[var(--text-muted)] mt-8">
         Need a key?{' '}
         <Link to="/dashboard/settings" className="text-[var(--accent)] underline underline-offset-2">

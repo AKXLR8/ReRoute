@@ -2,11 +2,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, displayColor, displayName, type AuditLog } from '../lib/api';
+import { toCsv } from '../lib/csv';
 import { signOut } from '../lib/nav';
-import { timeAgo } from '../lib/utils';
+import { timeAgo, statusOf } from '../lib/utils';
 import { DashPage, Segmented } from '../components/dashboard/DashPage';
 import { ChartCard } from '../components/dashboard/ChartCard';
-import { FileText, RefreshCw } from 'lucide-react';
+import { RequestDrawer } from '../components/dashboard/RequestDrawer';
+import { Download, FileText, RefreshCw } from 'lucide-react';
 
 const fmtDay = (d: string) =>
   new Date(`${d}T00:00:00`).toLocaleDateString(undefined, {
@@ -15,17 +17,19 @@ const fmtDay = (d: string) =>
     day: 'numeric',
   });
 
-/* cached wins the badge - it is the useful fact even when the cached call was a 200 */
-function statusOf(l: AuditLog): { label: string; color: string } {
-  if (l.is_cached) return { label: 'cached', color: 'var(--accent)' };
-  if (l.status_code === 403) return { label: 'blocked', color: 'var(--danger)' };
-  if (l.status_code >= 400) return { label: String(l.status_code), color: 'var(--danger)' };
-  return { label: String(l.status_code), color: 'var(--text-faint)' };
+function downloadCsv(rows: AuditLog[]) {
+  const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `reroute-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export default function LogsPage() {
   const [days, setDays] = useState(7);
   const [refreshing, setRefreshing] = useState(false);
+  const [selected, setSelected] = useState<AuditLog | null>(null);
 
   const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days) });
   const requests = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100) });
@@ -155,8 +159,19 @@ export default function LogsPage() {
 
           <ChartCard
             title="Recent requests"
-            subtitle="Newest first · hover a row for its error detail"
+            subtitle="Newest first · click a row for the full request"
             legend={reqs.length > 0 ? [{ color: 'var(--accent)', label: `${reqs.length} requests` }] : undefined}
+            action={
+              <button
+                type="button"
+                onClick={() => downloadCsv(reqs)}
+                disabled={reqs.length === 0}
+                title="Export the latest 100 requests"
+                className="h-8 px-3 rounded-lg flex items-center gap-1.5 text-[12px] font-medium text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--hover)] transition-colors disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <Download className="w-3.5 h-3.5" /> CSV
+              </button>
+            }
           >
             {requests.isLoading ? (
               <div className="px-4 pb-4 mt-2 space-y-2">
@@ -193,7 +208,15 @@ export default function LogsPage() {
                         <tr
                           key={l.id}
                           title={`${abs}${l.error_message ? `\n${l.error_message}` : ''}`}
-                          className="border-b border-[var(--border)] last:border-0 hover:bg-[rgba(255,255,255,0.02)] transition-colors"
+                          tabIndex={0}
+                          onClick={() => setSelected(l)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              setSelected(l);
+                            }
+                          }}
+                          className="border-b border-[var(--border)] last:border-0 hover:bg-[rgba(255,255,255,0.02)] focus:bg-[rgba(255,255,255,0.03)] focus:outline-none cursor-pointer transition-colors"
                         >
                           <td className="px-4 py-2.5 text-[var(--text-muted)] whitespace-nowrap">{timeAgo(l.timestamp)}</td>
                           <td className="px-4 py-2.5 font-mono text-[11px] text-[var(--text-primary)] max-w-[220px] truncate">{l.model_served}</td>
@@ -220,6 +243,8 @@ export default function LogsPage() {
           </ChartCard>
         </div>
       )}
+
+      <RequestDrawer log={selected} onClose={() => setSelected(null)} />
     </DashPage>
   );
 }

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
-import { KeyRound, RefreshCw, Wifi } from 'lucide-react';
+import { KeyRound, RefreshCw, Wifi, CheckCircle2, Circle, X } from 'lucide-react';
 import { api, displayName, displayColor, providerDisplay, type AuditLog } from '../lib/api';
 import { signOut } from '../lib/nav';
 import { DashPage, Segmented } from '../components/dashboard/DashPage';
@@ -271,9 +271,39 @@ export default function AnalyticsDashboard() {
 
   const market = useQuery({ queryKey: ['pricing'], queryFn: fetchMarket, staleTime: 24 * 60 * 60 * 1000, retry: 1 });
   const providerKeys = useQuery({ queryKey: ['providers'], queryFn: () => api.listProviders() });
+  const apiKeys = useQuery({ queryKey: ['api-keys'], queryFn: () => api.listApiKeys() });
+  const [onboardDismissed, setOnboardDismissed] = useState(
+    () => localStorage.getItem('onboard_dismissed') === '1',
+  );
 
   const rows = analytics.data ?? [];
-  const actRows = activity.data ?? [];
+  const actRows = useMemo(() => activity.data ?? [], [activity.data]);
+  const totals = useMemo(() => {
+    const sum = actRows.reduce(
+      (a, r) => ({
+        requests: a.requests + r.requests,
+        cost: a.cost + r.cost_usd,
+        saved: a.saved + r.cache_saved_usd,
+        cached: a.cached + r.cached,
+        latency: a.latency + r.avg_latency_ms * r.requests,
+      }),
+      { requests: 0, cost: 0, saved: 0, cached: 0, latency: 0 },
+    );
+    return {
+      ...sum,
+      avgLatency: sum.requests ? sum.latency / sum.requests : 0,
+      hitRate: sum.requests ? sum.cached / sum.requests : 0,
+    };
+  }, [actRows]);
+
+  const steps = [
+    { label: 'Create a gateway key', done: (apiKeys.data?.length ?? 0) > 0, to: '/dashboard/settings' },
+    { label: 'Connect a provider key', done: (providerKeys.data?.length ?? 0) > 0, to: '/dashboard/settings' },
+    { label: 'Send a request', done: (logs.data?.length ?? 0) > 0, to: '/docs' },
+    { label: 'Get a cache hit', done: (logs.data ?? []).some((l) => l.is_cached), to: '/dashboard/logs' },
+  ];
+  const showOnboarding =
+    !onboardDismissed && !apiKeys.isLoading && !providerKeys.isLoading && steps.some((s) => !s.done);
   const totalCost = rows.reduce((s, r) => s + r.total_cost_usd, 0);
   const donut = rows.filter((r) => r.total_cost_usd > 0)
     .map((r) => ({ name: displayName(r.provider), value: r.total_cost_usd, color: displayColor(r.provider) }));
@@ -428,6 +458,49 @@ export default function AnalyticsDashboard() {
           </div>
         ) : (
           <ErrorBoundary>
+            {showOnboarding && (
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 mb-4 flex flex-wrap items-center gap-x-5 gap-y-2">
+                <span className="text-[13px] font-semibold text-white">Get set up</span>
+                {steps.map((s) => (
+                  <Link
+                    key={s.label}
+                    to={s.to}
+                    className={`flex items-center gap-1.5 text-[12px] transition-colors ${s.done ? 'text-[var(--text-faint)] line-through' : 'text-[var(--text-secondary)] hover:text-white'}`}
+                  >
+                    {s.done ? <CheckCircle2 className="w-3.5 h-3.5 text-[var(--accent)]" /> : <Circle className="w-3.5 h-3.5" />}
+                    {s.label}
+                  </Link>
+                ))}
+                <button
+                  type="button"
+                  aria-label="Dismiss checklist"
+                  onClick={() => {
+                    setOnboardDismissed(true);
+                    localStorage.setItem('onboard_dismissed', '1');
+                  }}
+                  className="ml-auto text-[var(--text-faint)] hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="rounded-2xl border border-[var(--border)] overflow-hidden grid grid-cols-2 md:grid-cols-5 gap-px bg-[var(--border)] mb-6">
+              {[
+                { label: 'Spend', value: `$${totals.cost.toFixed(2)}`, sub: `last ${days} days`, tone: 'white' },
+                { label: 'Saved by cache', value: `$${totals.saved.toFixed(2)}`, sub: `${totals.cached.toLocaleString()} cache hits`, tone: 'var(--accent)' },
+                { label: 'Requests', value: totals.requests.toLocaleString(), sub: 'gateway traffic', tone: 'white' },
+                { label: 'Cache hit rate', value: totals.requests ? `${Math.round(totals.hitRate * 100)}%` : '—', sub: 'of requests', tone: 'white' },
+                { label: 'Avg latency', value: totals.requests ? `${Math.round(totals.avgLatency)}ms` : '—', sub: 'weighted by requests', tone: 'white' },
+              ].map((k) => (
+                <div key={k.label} className="bg-[var(--bg-card)] px-4 py-3.5">
+                  <p className="text-[10px] uppercase tracking-widest text-[var(--text-faint)]">{k.label}</p>
+                  <p className="text-[20px] font-bold tracking-tight mt-1 tabular-nums" style={{ color: k.tone }}>{k.value}</p>
+                  <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{k.sub}</p>
+                </div>
+              ))}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6 items-start">
               {/* LEFT: cards + recent */}
               <div>

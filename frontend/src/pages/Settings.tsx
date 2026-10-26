@@ -584,7 +584,10 @@ export default function SettingsPage() {
             <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
               <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
               {import.meta.env.PROD ? 'Production' : 'Development'}
-              <Link to="/docs" className="ml-auto underline decoration-[var(--text-faint)] underline-offset-2 hover:text-[var(--text-primary)] transition-colors">
+              <Link to="/status" className="ml-auto underline decoration-[var(--text-faint)] underline-offset-2 hover:text-[var(--text-primary)] transition-colors">
+                Status
+              </Link>
+              <Link to="/docs" className="underline decoration-[var(--text-faint)] underline-offset-2 hover:text-[var(--text-primary)] transition-colors">
                 Quickstart
               </Link>
             </div>
