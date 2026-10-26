@@ -58,6 +58,7 @@ async def list_audit_logs(
             "model_served": lg.model_served, "input_tokens": lg.input_tokens,
             "output_tokens": lg.output_tokens, "cost_usd": lg.cost_usd,
             "latency_ms": lg.latency_ms, "status_code": lg.status_code,
+            "error_message": lg.error_message,
             "ttft_ms": lg.ttft_ms, "tokens_per_sec": lg.tokens_per_sec,
             "finish_reason": lg.finish_reason, "is_cached": lg.is_cached,
             "cache_saved_usd": lg.cache_saved_usd, "trace_id": lg.trace_id,

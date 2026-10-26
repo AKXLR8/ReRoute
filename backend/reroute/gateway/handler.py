@@ -26,7 +26,13 @@ from ..prompt.guardrails import GuardrailViolation, PromptGuard, flatten_text
 from ..providers.base import Provider
 from ..rate_limit.rate_limiter import RateLimiter, RateLimitExceeded
 from ..router.router import Router
-from ..schemas.chat import ChatRequest, ChatResponse, Usage
+from ..schemas.chat import (
+    ChatRequest,
+    ChatResponse,
+    StreamingChoice,
+    StreamingChunk,
+    Usage,
+)
 
 log = logging.getLogger(__name__)
 tracer = trace.get_tracer("rerouteai.gateway")
@@ -130,7 +136,7 @@ class GatewayHandler:
                     latency_s=time.monotonic() - t0,
                 )
                 await self._audit_failure(
-                    db, auth, request, 403, f"GuardrailViolation: {e.detail}"
+                    db, auth, request, 403, f"GuardrailViolation[{e.rule}]: {e.detail}"
                 )
                 return ChatResponse(
                     id=request_id,
@@ -262,6 +268,10 @@ class GatewayHandler:
         finish_reason: str | None = None
         cost = 0.0
         acquired = False
+        is_cached = False
+        cache_saved = 0.0
+        cached_provider: str | None = None
+        content: list[str] = []
         try:
             # Rate limits inside the try so stream 429s are metered + audited,
             # same as the non-stream path. Release only what was acquired.
@@ -278,9 +288,43 @@ class GatewayHandler:
             except GuardrailViolation as e:
                 log.warning("Guardrail violation (stream): %s", e)
                 status_code = 403
-                error = f"GuardrailViolation: {e.detail}"
+                error = f"GuardrailViolation[{e.rule}]: {e.detail}"
                 yield f'data: {json.dumps({"error": e.detail})}\n\n'
                 return
+
+            # --- Semantic cache: replay the hit as a one-shot stream. Streaming
+            # clients previously always paid provider latency for a repeat. ---
+            cached = await self.cache.get(request, scope=scope)
+            if cached:
+                choice0 = (cached.get("choices") or [{}])[0]
+                cached_model = cached.get("model") or request.model
+                cached_provider = cached.get("provider")
+                served_model = cached_model
+                finish_reason = choice0.get("finish_reason") or "stop"
+                is_cached = True
+                cache_saved = self._cache_savings(cached, providers, request.model)
+                metrics_collector.record_cache_hit(cost_saved=cache_saved)
+                now = int(time.time())
+                cached_text = (choice0.get("message") or {}).get("content") or ""
+                body = StreamingChunk(
+                    id=request_id,
+                    created=now,
+                    model=cached_model,
+                    choices=[StreamingChoice(delta={"role": "assistant", "content": cached_text})],
+                )
+                tail = StreamingChunk(
+                    id=request_id,
+                    created=now,
+                    model=cached_model,
+                    choices=[StreamingChoice(delta={}, finish_reason=finish_reason)],
+                )
+                yield f"data: {body.model_dump_json()}\n\n"
+                yield f"data: {tail.model_dump_json()}\n\n"
+                yield "data: [DONE]\n\n"
+                completed = True
+                status_code = 200
+                return
+            metrics_collector.record_cache_miss()
 
             # --- Route ---
             provider, fallback_from = await self.router.route_stream(request, providers)
@@ -303,9 +347,12 @@ class GatewayHandler:
                         c0 = chunk.choices[0]
                         if c0.finish_reason:
                             finish_reason = c0.finish_reason
-                        # first content-bearing delta = first token
-                        if t_first is None and c0.delta.get("content"):
-                            t_first = time.monotonic()
+                        if isinstance(c0.delta.get("content"), str):
+                            # assembled so the completed stream can be cached
+                            content.append(c0.delta["content"])
+                            # first content-bearing delta = first token
+                            if t_first is None:
+                                t_first = time.monotonic()
                     yield f"data: {chunk.model_dump_json()}\n\n"
                 span.set_attribute("gen_ai.response.model", served_model)
                 if t_first is not None:
@@ -320,6 +367,29 @@ class GatewayHandler:
             yield "data: [DONE]\n\n"
             completed = True
             status_code = 200
+            # --- Cache store: the assembled completion, so an identical stream
+            # hits cache next time. Failures here never fail a finished stream.
+            if content and provider:
+                try:
+                    await self.cache.set(
+                        request,
+                        ChatResponse(
+                            id=request_id,
+                            model=served_model,
+                            choices=[{
+                                "index": 0,
+                                "message": {"role": "assistant", "content": "".join(content)},
+                                "finish_reason": finish_reason,
+                            }],
+                            usage=usage,
+                            provider=provider.name,
+                            latency_ms=(time.monotonic() - t0) * 1000,
+                            trace_id=request_id,
+                        ).model_dump(),
+                        scope=scope,
+                    )
+                except Exception:
+                    log.exception("Failed to store stream response in cache")
         except RateLimitExceeded as exc:
             status_code = 429
             error = f"{type(exc).__name__}: {exc}"
@@ -348,17 +418,22 @@ class GatewayHandler:
                     usage.prompt_tokens, usage.completion_tokens, request.model
                 )
             metrics_collector.record_request(
-                provider=provider.name if provider else "gateway",
+                provider=cached_provider or (provider.name if provider else "gateway"),
                 model=request.model,
                 status=(
-                    "success" if completed
-                    else ("blocked" if status_code == 403 else "error")
+                    "cached"
+                    if is_cached
+                    else "success"
+                    if completed
+                    else "blocked"
+                    if status_code == 403
+                    else "error"
                 ),
                 team_id=scope,
                 latency_s=latency_s,
-                input_tokens=usage.prompt_tokens if usage else 0,
-                output_tokens=usage.completion_tokens if usage else 0,
-                cost=cost,
+                input_tokens=0 if is_cached else (usage.prompt_tokens if usage else 0),
+                output_tokens=0 if is_cached else (usage.completion_tokens if usage else 0),
+                cost=0.0 if is_cached else cost,
             )
             if provider and completed:
                 metrics_collector.record_stream_timing(
@@ -376,13 +451,15 @@ class GatewayHandler:
             try:
                 stmt = AuditLog.__table__.insert().values(
                     user_id=_uid(auth),
-                    provider=provider.name if provider else "gateway",
+                    provider=cached_provider or (provider.name if provider else "gateway"),
                     model_requested=request.model,
                     model_served=served_model,
-                    input_tokens=usage.prompt_tokens if usage else 0,
-                    output_tokens=usage.completion_tokens if usage else 0,
-                    cost_usd=cost,
+                    input_tokens=0 if is_cached else (usage.prompt_tokens if usage else 0),
+                    output_tokens=0 if is_cached else (usage.completion_tokens if usage else 0),
+                    cost_usd=0.0 if is_cached else cost,
                     is_stream=True,
+                    is_cached=is_cached,
+                    cache_saved_usd=cache_saved,
                     latency_ms=latency_s * 1000,
                     ttft_ms=ttft_s * 1000 if ttft_s is not None else None,
                     tokens_per_sec=tps,

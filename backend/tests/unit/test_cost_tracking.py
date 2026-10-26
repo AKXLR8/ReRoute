@@ -146,7 +146,7 @@ async def test_stream_audit_and_metrics_carry_usage_and_cost():
     handler = GatewayHandler(
         router=router,
         rate_limiter=AsyncMock(),
-        cache=AsyncMock(),
+        cache=AsyncMock(**{"get.return_value": None}),
         circuit_breakers=MagicMock(),
         deduplicator=RequestDeduplicator(),
     )
