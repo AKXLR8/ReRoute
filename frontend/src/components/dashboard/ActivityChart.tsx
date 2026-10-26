@@ -61,8 +61,8 @@ export function ActivityChart({ days, rows, title = 'Usage by model', action }: 
           <YAxis yAxisId="req" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis yAxisId="cost" orientation="right" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v, name) => [name === 'Spend' ? `$${Number(v ?? 0)}` : Number(v ?? 0).toLocaleString(), name]} />
-          <Area yAxisId="req" type="monotone" dataKey="requests" name="Requests" stroke="#00D2A0" strokeWidth={1.5} fill="url(#gReq)" dot={false} />
-          <Area yAxisId="cost" type="monotone" dataKey="cost" name="Spend" stroke="#F5B301" strokeWidth={1.5} fill="url(#gCostAct)" dot={false} />
+          <Area yAxisId="req" type="monotone" dataKey="requests" name="Requests" stroke="#00D2A0" strokeWidth={1.5} fill="url(#gReq)" dot={{ r: 2.5 }} />
+          <Area yAxisId="cost" type="monotone" dataKey="cost" name="Spend" stroke="#F5B301" strokeWidth={1.5} fill="url(#gCostAct)" dot={{ r: 2.5 }} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>

@@ -260,10 +260,12 @@ export default function AnalyticsDashboard() {
   const [days, setDays] = useState(30);
   const [compare, setCompare] = useState<string | null>(null);
 
-  const analytics = useQuery({ queryKey: ['analytics', days], queryFn: () => api.getAnalytics(days) });
-  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days) });
-  const breakdown = useQuery({ queryKey: ['breakdown', days], queryFn: () => api.getBreakdown(days) });
-  const logs = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100) });
+  // ponytail: 10s poll, no staleness — new gateway traffic shows up while watching.
+  const live = { staleTime: 0, refetchInterval: 10_000, refetchOnWindowFocus: 'always' } as const;
+  const analytics = useQuery({ queryKey: ['analytics', days], queryFn: () => api.getAnalytics(days), ...live });
+  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days), ...live });
+  const breakdown = useQuery({ queryKey: ['breakdown', days], queryFn: () => api.getBreakdown(days), ...live });
+  const logs = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100), ...live });
 
   const market = useQuery({ queryKey: ['pricing'], queryFn: fetchMarket, staleTime: 24 * 60 * 60 * 1000, retry: 1 });
   const providerKeys = useQuery({ queryKey: ['providers'], queryFn: () => api.listProviders() });

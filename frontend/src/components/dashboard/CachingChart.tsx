@@ -46,8 +46,8 @@ export function CachingChart({ days, rows }: { days: number; rows: ActivityDay[]
           <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
           <YAxis tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v, name) => [Number(v ?? 0).toLocaleString(), name]} />
-          <Area type="monotone" dataKey="Uncached" stackId="c" stroke="#9CA3AF" strokeWidth={1.5} fill="rgba(156,163,175,0.12)" dot={false} />
-          <Area type="monotone" dataKey="Cached" stackId="c" stroke="#F5B301" strokeWidth={1.5} fill="rgba(245,179,1,0.15)" dot={false} />
+          <Area type="monotone" dataKey="Uncached" stackId="c" stroke="#9CA3AF" strokeWidth={1.5} fill="rgba(156,163,175,0.12)" dot={{ r: 2.5 }} />
+          <Area type="monotone" dataKey="Cached" stackId="c" stroke="#F5B301" strokeWidth={1.5} fill="rgba(245,179,1,0.15)" dot={{ r: 2.5 }} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>

@@ -43,8 +43,8 @@ export function TokensChart({ days, rows }: { days: number; rows: ActivityDay[] 
           <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
           <YAxis tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v, name) => [Number(v ?? 0).toLocaleString(), name]} />
-          <Area type="monotone" dataKey="Prompt" stackId="t" stroke="#4F8EF7" strokeWidth={1.5} fill="rgba(79,142,247,0.12)" dot={false} />
-          <Area type="monotone" dataKey="Completion" stackId="t" stroke="#8B5CF6" strokeWidth={1.5} fill="rgba(139,92,246,0.15)" dot={false} />
+          <Area type="monotone" dataKey="Prompt" stackId="t" stroke="#4F8EF7" strokeWidth={1.5} fill="rgba(79,142,247,0.12)" dot={{ r: 2.5 }} />
+          <Area type="monotone" dataKey="Completion" stackId="t" stroke="#8B5CF6" strokeWidth={1.5} fill="rgba(139,92,246,0.15)" dot={{ r: 2.5 }} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>

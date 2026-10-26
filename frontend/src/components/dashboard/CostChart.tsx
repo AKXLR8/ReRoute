@@ -27,7 +27,7 @@ export function CostChart({ rows, action, title = 'Spend by provider' }: { rows:
           <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v) => [`$${Number(v ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 })}`, 'Cost']} />
-          <Area type="monotone" dataKey="cost" name="Cost" stroke="#4493f8" strokeWidth={1.5} fill="rgba(68,147,248,0.1)" dot={false} />
+          <Area type="monotone" dataKey="cost" name="Cost" stroke="#4493f8" strokeWidth={1.5} fill="rgba(68,147,248,0.1)" dot={{ r: 2.5 }} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>

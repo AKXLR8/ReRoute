@@ -35,7 +35,7 @@ export function LatencyChart({ rows }: { rows: Analytics[] }) {
           <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <YAxis tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v) => [`${Number(v ?? 0)}ms`, 'Latency']} />
-          <Area type="monotone" dataKey="latency" name="Latency" stroke="#F5B301" strokeWidth={1.5} fill="url(#gLatency)" dot={false} />
+          <Area type="monotone" dataKey="latency" name="Latency" stroke="#F5B301" strokeWidth={1.5} fill="url(#gLatency)" dot={{ r: 2.5 }} />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>

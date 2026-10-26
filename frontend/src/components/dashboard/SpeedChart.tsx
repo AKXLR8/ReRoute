@@ -43,8 +43,8 @@ export function SpeedChart({ days, rows }: { days: number; rows: ActivityDay[] }
           <XAxis dataKey="name" tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} interval="preserveStartEnd" />
           <YAxis tick={{ fill: '#4B5563', fontSize: 10 }} axisLine={false} tickLine={false} />
           <Tooltip {...tipStyle} formatter={(v, name) => [Number(v ?? 0).toLocaleString(), name]} />
-          <Area type="monotone" dataKey="TTFT" stroke="#F5B301" strokeWidth={1.5} fill="rgba(245,179,1,0.12)" dot={false} connectNulls />
-          <Area type="monotone" dataKey="Tok/s" stroke="#3B82F6" strokeWidth={1.5} fill="rgba(59,130,246,0.12)" dot={false} connectNulls />
+          <Area type="monotone" dataKey="TTFT" stroke="#F5B301" strokeWidth={1.5} fill="rgba(245,179,1,0.12)" dot={{ r: 2.5 }} connectNulls />
+          <Area type="monotone" dataKey="Tok/s" stroke="#3B82F6" strokeWidth={1.5} fill="rgba(59,130,246,0.12)" dot={{ r: 2.5 }} connectNulls />
         </AreaChart>
       </ResponsiveContainer>
     </ChartCard>
