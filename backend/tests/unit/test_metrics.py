@@ -1,5 +1,13 @@
 """Tests for metrics collector."""
 
+from unittest.mock import AsyncMock
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from reroute.app import create_app
+from reroute.auth.auth import AuthContext, get_current_user
+from reroute.database import get_db
 from reroute.observability.metrics import MetricsCollector
 
 
@@ -45,3 +53,28 @@ def test_set_provider_health():
     mc = MetricsCollector()
     mc.set_provider_health("openai", True)
     mc.set_provider_health("openai", False)
+
+
+@pytest.mark.asyncio
+async def test_metrics_requires_admin():
+    app = create_app()
+    app.dependency_overrides[get_db] = lambda: AsyncMock()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/metrics")).status_code == 401
+
+    member = AuthContext(is_admin=False, role="member")
+    app.dependency_overrides[get_current_user] = lambda: member
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (await client.get("/metrics")).status_code == 403
+
+    app.dependency_overrides[get_current_user] = lambda: AuthContext(is_admin=True)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        res = await client.get("/metrics")
+    assert res.status_code == 200
+    assert "forge_requests_total" in res.text

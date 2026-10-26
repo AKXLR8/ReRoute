@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .api import admin_router, auth_router, chat_router, users_router
+from .auth.auth import AuthContext, get_current_user
 from .config import get_settings
 from .database import get_db
 from .observability.metrics import metrics_collector
@@ -217,10 +218,15 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(users_router)
 
-    # Prometheus metrics endpoint
-    app.add_api_route(
-        "/metrics", prometheus_endpoint, methods=["GET"], include_in_schema=False
-    )
+    # Metrics expose per-user UUIDs (team_id labels), spend, and traffic: admin only.
+    async def metrics(
+        http_request: Request, auth: AuthContext = Depends(get_current_user)
+    ) -> Response:
+        if not auth.is_admin:
+            raise HTTPException(status_code=403, detail="Admin access required")
+        return await prometheus_endpoint(http_request)
+
+    app.add_api_route("/metrics", metrics, methods=["GET"], include_in_schema=False)
 
     @app.get("/health")
     async def health():
