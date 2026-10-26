@@ -59,7 +59,6 @@ async def test_status_reports_provider_health_and_open_circuit():
     assert body["providers"] == [
         {
             "name": "openai",
-            "configured": True,
             "health": "up",
             "circuit": "open",
             "latency_ms": 12.3,

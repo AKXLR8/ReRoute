@@ -4,7 +4,6 @@ import { API_URL, displayColor, displayName } from '../lib/api';
 
 interface ProviderStatus {
   name: string;
-  configured: boolean;
   health: 'up' | 'down' | 'unknown';
   circuit: string;
   latency_ms: number | null;
@@ -85,7 +84,6 @@ export default function Status() {
               <div key={p.name} className="flex items-center gap-3 px-5 py-3 border-t border-[var(--border)]">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ background: displayColor(p.name) }} />
                 <span className="text-[13px] text-[var(--text-primary)]">{displayName(p.name)}</span>
-                {!p.configured && <span className="text-[10px] text-[var(--text-faint)] italic">not configured</span>}
                 {p.latency_ms != null && (
                   <span className="text-[11px] text-[var(--text-faint)] tabular-nums">{Math.round(p.latency_ms)}ms</span>
                 )}
@@ -95,10 +93,16 @@ export default function Status() {
                       circuit {p.circuit.replace('_', ' ')}
                     </span>
                   )}
-                  <Dot tone={TONE[p.health]} />
-                  <span className="text-[11px] capitalize" style={{ color: p.health === 'up' ? 'var(--text-muted)' : TONE[p.health] }}>
-                    {p.health}
-                  </span>
+                  {p.health === 'unknown' ? (
+                    <span className="text-[11px] text-[var(--text-faint)]">not monitored</span>
+                  ) : (
+                    <>
+                      <Dot tone={TONE[p.health]} />
+                      <span className="text-[11px] capitalize" style={{ color: p.health === 'up' ? 'var(--text-muted)' : TONE[p.health] }}>
+                        {p.health}
+                      </span>
+                    </>
+                  )}
                 </span>
               </div>
             ))}

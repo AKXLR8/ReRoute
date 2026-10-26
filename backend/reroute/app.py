@@ -271,7 +271,6 @@ def create_app() -> FastAPI:
                 providers.append(
                     {
                         "name": name,
-                        "configured": bool(provider.api_key or name == "ollama"),
                         "health": (
                             "unknown"
                             if not health.last_check
