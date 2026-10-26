@@ -1,20 +1,30 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import TopNav from './components/TopNav';
-import Landing from './pages/Landing';
-import Models from './pages/Models';
-import AnalyticsDashboard from './pages/AnalyticsDashboard';
-import SettingsPage from './pages/Settings';
-import LogsPage from './pages/Logs';
-import UsersPage from './pages/Users';
 import { ArrowRight } from 'lucide-react';
-import { bootSession, exchangeGithub, type SessionUser } from './lib/auth';
+import { bootSession, exchangeGithub, storedUser, type SessionUser } from './lib/auth';
 import { ToastInitializer } from './components/ToastInitializer';
 import Auth from './pages/Auth';
 
+// ponytail: route chunks keep recharts/framer-motion off the login + first paint.
+const Landing = lazy(() => import('./pages/Landing'));
+const Models = lazy(() => import('./pages/Models'));
+const AnalyticsDashboard = lazy(() => import('./pages/AnalyticsDashboard'));
+const SettingsPage = lazy(() => import('./pages/Settings'));
+const LogsPage = lazy(() => import('./pages/Logs'));
+const UsersPage = lazy(() => import('./pages/Users'));
+
+const PageFallback = (
+  <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg-base)' }}>
+    <p className="text-sm text-[#6B7280]">Loading…</p>
+  </div>
+);
+
 function DashboardShell() {
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [checking, setChecking] = useState(true);
+  // ponytail: paint from the cached session, verify in the background — a refresh
+  // shouldn't wait on a network round-trip to show the shell.
+  const [user, setUser] = useState<SessionUser | null>(() => storedUser());
+  const [checking, setChecking] = useState(() => !storedUser());
 
   useEffect(() => {
     let alive = true;
@@ -53,14 +63,16 @@ function DashboardShell() {
 
   const isAdmin = user.role === 'admin';
   return (
-    <Routes>
-      <Route index element={<AnalyticsDashboard />} />
-      <Route path="models" element={<Models />} />
-      <Route path="logs" element={<LogsPage />} />
-      <Route path="settings" element={<SettingsPage />} />
-      <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />} />
-      <Route path="*" element={<Navigate to="/dashboard" replace />} />
-    </Routes>
+    <Suspense fallback={PageFallback}>
+      <Routes>
+        <Route index element={<AnalyticsDashboard />} />
+        <Route path="models" element={<Models />} />
+        <Route path="logs" element={<LogsPage />} />
+        <Route path="settings" element={<SettingsPage />} />
+        <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+      </Routes>
+    </Suspense>
   );
 }
 
@@ -89,12 +101,14 @@ export default function App() {
   return (
     <>
       <ToastInitializer />
-      <Routes>
-        <Route path="/" element={<PublicPage><Landing /></PublicPage>} />
-        <Route path="/models" element={<PublicPage><Models /></PublicPage>} />
-        <Route path="/docs" element={<PublicPage><div className="container-x py-24 text-center"><h1 className="text-3xl font-bold text-white">Documentation</h1><p className="text-[#6B7280] mt-3">Coming soon.</p></div></PublicPage>} />
-        <Route path="/dashboard/*" element={<DashboardShell />} />
-      </Routes>
+      <Suspense fallback={PageFallback}>
+        <Routes>
+          <Route path="/" element={<PublicPage><Landing /></PublicPage>} />
+          <Route path="/models" element={<PublicPage><Models /></PublicPage>} />
+          <Route path="/docs" element={<PublicPage><div className="container-x py-24 text-center"><h1 className="text-3xl font-bold text-white">Documentation</h1><p className="text-[#6B7280] mt-3">Coming soon.</p></div></PublicPage>} />
+          <Route path="/dashboard/*" element={<DashboardShell />} />
+        </Routes>
+      </Suspense>
     </>
   );
 }

@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["sin1"],
   "functions": {
     "main.py": {
       "excludeFiles": "{tests/**,**/*.log,**/__pycache__/**,.venv/**,.mypy_cache/**,.ruff_cache/**,.pytest_cache/**}"
