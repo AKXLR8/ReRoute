@@ -1,5 +1,5 @@
 ﻿import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { api, displayColor, displayName, type AuditLog } from '../lib/api';
 import { toCsv } from '../lib/csv';
@@ -31,7 +31,7 @@ export default function LogsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
-  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days) });
+  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days), placeholderData: keepPreviousData });
   const requests = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100) });
 
   const isError = activity.isError || requests.isError;

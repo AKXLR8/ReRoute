@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
@@ -264,9 +264,9 @@ export default function AnalyticsDashboard() {
 
   // ponytail: 10s poll, no staleness — new gateway traffic shows up while watching.
   const live = { staleTime: 0, refetchInterval: 10_000, refetchOnWindowFocus: 'always' } as const;
-  const analytics = useQuery({ queryKey: ['analytics', days], queryFn: () => api.getAnalytics(days), ...live });
-  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days), ...live });
-  const breakdown = useQuery({ queryKey: ['breakdown', days], queryFn: () => api.getBreakdown(days), ...live });
+  const analytics = useQuery({ queryKey: ['analytics', days], queryFn: () => api.getAnalytics(days), placeholderData: keepPreviousData, ...live });
+  const activity = useQuery({ queryKey: ['activity', days], queryFn: () => api.getActivity(days), placeholderData: keepPreviousData, ...live });
+  const breakdown = useQuery({ queryKey: ['breakdown', days], queryFn: () => api.getBreakdown(days), placeholderData: keepPreviousData, ...live });
   const logs = useQuery({ queryKey: ['logs'], queryFn: () => api.listLogs(100), ...live });
 
   const market = useQuery({ queryKey: ['pricing'], queryFn: fetchMarket, staleTime: 24 * 60 * 60 * 1000, retry: 1 });

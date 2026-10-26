@@ -15,6 +15,8 @@ const LogsPage = lazy(() => import('./pages/Logs'));
 const UsersPage = lazy(() => import('./pages/Users'));
 const Docs = lazy(() => import('./pages/Docs'));
 const Status = lazy(() => import('./pages/Status'));
+// lazy so framer-motion stays out of the login/landing entry chunk
+const TopBar = lazy(() => import('./components/dashboard/DashPage').then((m) => ({ default: m.TopBar })));
 
 /* a route change starts at the top - browser scroll position otherwise leaks across pages */
 function ScrollToTop() {
@@ -63,6 +65,18 @@ function DashboardShell() {
     };
   }, []);
 
+  // warm tab chunks after first paint so switching tabs never shows a spinner
+  useEffect(() => {
+    if (!user) return;
+    const id = window.setTimeout(() => {
+      void import('./pages/Logs');
+      void import('./pages/Models');
+      void import('./pages/Settings');
+      void import('./pages/Users');
+    }, 600);
+    return () => window.clearTimeout(id);
+  }, [user]);
+
   if (checking) {
     return (
       <div className="flex items-center justify-center min-h-screen" style={{ background: 'var(--bg-base)' }}>
@@ -74,16 +88,21 @@ function DashboardShell() {
 
   const isAdmin = user.role === 'admin';
   return (
-    <Suspense fallback={PageFallback}>
-      <Routes>
-        <Route index element={<AnalyticsDashboard />} />
-        <Route path="models" element={<Models />} />
-        <Route path="logs" element={<LogsPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
-      </Routes>
-    </Suspense>
+    <div className="min-h-screen" style={{ background: 'var(--bg-base)' }}>
+      <Suspense fallback={<div className="h-14 border-b border-[var(--border)]" style={{ background: '#000' }} />}>
+        <TopBar />
+      </Suspense>
+      <Suspense fallback={PageFallback}>
+        <Routes>
+          <Route index element={<AnalyticsDashboard />} />
+          <Route path="models" element={<Models />} />
+          <Route path="logs" element={<LogsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="users" element={isAdmin ? <UsersPage /> : <Navigate to="/dashboard" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        </Routes>
+      </Suspense>
+    </div>
   );
 }
 
