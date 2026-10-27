@@ -457,7 +457,7 @@ backend/
 ├── reroute/
 │   ├── api/            # route handlers: chat, auth, admin reads, users
 │   ├── auth/           # passwords (stdlib PBKDF2), JWT, account/refresh logic
-│   ├── cache/          # semantic cache (sentence-transformers) + request dedup
+│   ├── cache/          # semantic cache (ONNX MiniLM) + request dedup
 │   ├── circuit_breaker/
 │   ├── gateway/        # request handler: rate limit → guard → cache → route → audit
 │   ├── models/         # SQLAlchemy: User, AuditLog, ProviderKey, ApiKey, RefreshToken
