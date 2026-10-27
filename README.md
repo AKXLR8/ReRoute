@@ -1,5 +1,9 @@
 # ReRouteAI
 
+<p align="center">
+  <img src="assets/logo.png" width="120" alt="ReRouteAI logo">
+</p>
+
 A self-hosted gateway between your applications and LLM providers. Accounts sign in,
 connect **their own** provider keys, and call an OpenAI-compatible API. A React
 dashboard shows spend, logs, and per-user analytics.
