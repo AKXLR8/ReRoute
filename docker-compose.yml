@@ -59,6 +59,8 @@ services:
     image: prom/prometheus:latest
     ports:
       - "127.0.0.1:9090:9090"
+    env_file:
+      - ./backend/.env
     volumes:
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./docker/alerts.yml:/etc/prometheus/alerts.yml
