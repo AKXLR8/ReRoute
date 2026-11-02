@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import socket
 import uuid
 from unittest.mock import AsyncMock, MagicMock, Mock
 
@@ -287,3 +288,40 @@ async def test_purge_legacy_cache_deletes_only_plaintext_entries(redis):
     await byok.purge_legacy_cache(redis)
     assert await redis.get(legacy) is None
     assert await redis.get(current) == b"encrypted"
+
+
+@pytest.mark.asyncio
+async def test_base_url_hostname_cannot_resolve_to_private_ip(monkeypatch):
+    monkeypatch.setattr(
+        byok.socket,
+        "getaddrinfo",
+        lambda *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 0))
+        ],
+    )
+    with pytest.raises(HTTPException) as exc:
+        await byok._check_base_url_resolved("https://evil.example/v1")
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_base_url_hostname_resolving_public_is_allowed(monkeypatch):
+    monkeypatch.setattr(
+        byok.socket,
+        "getaddrinfo",
+        lambda *a, **k: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))
+        ],
+    )
+    await byok._check_base_url_resolved("https://api.example.com/v1")
+
+
+@pytest.mark.asyncio
+async def test_base_url_unresolvable_host_is_rejected(monkeypatch):
+    def fail(*a, **k):
+        raise socket.gaierror("no dns")
+
+    monkeypatch.setattr(byok.socket, "getaddrinfo", fail)
+    with pytest.raises(HTTPException) as exc:
+        await byok._check_base_url_resolved("https://nope.invalid/v1")
+    assert exc.value.status_code == 422

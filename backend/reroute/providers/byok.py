@@ -12,12 +12,15 @@ workers see key changes instantly.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import contextlib
 import copy
 import hashlib
+import ipaddress
 import json
 import logging
+import socket
 import uuid
 from datetime import datetime
 from urllib.parse import urlparse
@@ -117,9 +120,60 @@ def _check_base_url(url: str) -> None:
                     detail="base_url host is not allowed (private/reserved IP blocked)",
                 )
         except ValueError:
-            # hostname, not IP — could DNS-resolve to private IP at runtime.
-            # Full protection needs egress policy at network layer.
+            # hostname, not IP - could DNS-resolve to private IP at runtime.
+            # The connect path also calls _check_base_url_resolved().
             pass
+
+
+def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_reserved
+        or ip.is_multicast
+        or ip.is_unspecified
+    )
+
+
+async def _check_base_url_resolved(url: str) -> None:
+    """_check_base_url plus a DNS check so a public hostname cannot resolve to
+    localhost/RFC1918/metadata. Connect-time only; full SSRF protection still
+    needs egress policy + DNS pinning at the proxy layer.
+    """
+    _check_base_url(url)
+    s = get_settings()
+    if s.allow_private_base_urls:
+        return
+    host = urlparse(url).hostname
+    if not host:
+        return
+    try:
+        ipaddress.ip_address(host)
+        return  # literal was already checked synchronously
+    except ValueError:
+        pass
+
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo, host, None, 0, socket.SOCK_STREAM
+        )
+    except OSError as exc:
+        raise HTTPException(
+            status_code=422, detail="base_url host could not be resolved"
+        ) from exc
+    if not infos:
+        raise HTTPException(status_code=422, detail="base_url host could not be resolved")
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0].split("%", 1)[0])
+        except ValueError:
+            continue
+        if _is_blocked_ip(ip):
+            raise HTTPException(
+                status_code=422,
+                detail="base_url host resolves to a private/reserved IP",
+            )
 
 
 def _instance_key(user_id: str) -> str:
@@ -311,7 +365,7 @@ async def connect(
     if not api_key and not base_url:
         raise HTTPException(status_code=422, detail="Provide an api_key and/or base_url")
     if base_url:
-        _check_base_url(base_url)
+        await _check_base_url_resolved(base_url)
 
     probe = clone_with_key(shared, api_key, base_url)
     try:

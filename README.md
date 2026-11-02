@@ -293,6 +293,7 @@ wildcard allowed hosts.
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` / `_RECOVERY_SECONDS` | `5` / `30` | |
 | `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_DELAY` / `RETRY_MAX_DELAY` | `3` / `0.5` / `20` | honors `Retry-After`, capped by `RETRY_MAX_DELAY` |
 | `AUDIT_RETENTION_DAYS` | `365` | used by `scripts/purge_audit.py --apply` |
+| `REFRESH_TOKEN_RETENTION_DAYS` | `30` | revoked tokens older than this are purged; expired tokens always are (see `scripts/purge_refresh_tokens.py`) |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | 413 above this |
 | `ALLOW_PRIVATE_BASE_URLS` | `false` | blocks RFC1918/link-local/metadata in `base_url` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/HTTP collector URL (port 4318). Empty = tracing off |
@@ -361,6 +362,8 @@ Backend env requirements beyond the checklist above:
   (already-applied migrations don't re-run; concurrent instances would race)
 - `ENVIRONMENT=production`, plus real `CORS_ORIGINS` / `ALLOWED_HOSTS`
   after the frontend project's URL is known
+- Vercel freezes background work, so provider health can go stale. Admins can
+  refresh it on demand with `POST /admin/health/refresh` (or point a cron at it).
 
 ## Security
 
@@ -375,9 +378,10 @@ Backend env requirements beyond the checklist above:
   management is session-only, so a leaked key cannot mint more keys.
 - **BYOK** — provider keys are Fernet-encrypted at rest, masked in responses,
   and resolved per user. Provider `base_url` rejects private, link-local and
-  cloud-metadata addresses unless `ALLOW_PRIVATE_BASE_URLS=true`.
+  cloud-metadata addresses, including hostnames that resolve to them, unless
+  `ALLOW_PRIVATE_BASE_URLS=true`. DNS rebinding still needs egress policy.
 - **Isolation** — read/admin routes filter to the caller unless the role is
-  admin. `/metrics` is admin-only (its labels include user UUIDs and spend).
+  admin. `/metrics` is admin-only; labels are bounded and carry no user UUIDs.
 - **Public by design** — `/health`, `/readyz`, `/status` (aggregate, 10s cache),
   `/docs`, `/openapi.json`. None return user rows, keys, prompts or completions.
 - **Production checks** — `ENVIRONMENT=production` refuses placeholder secrets,
@@ -472,8 +476,8 @@ backend/
 │   ├── retry/          # exponential backoff with jitter
 │   ├── router/         # health + model-support based selection (emits llm.chat spans)
 │   └── schemas/        # Pydantic request/response models
-├── alembic/versions/   # 001 → 009
-└── tests/              # 227 tests (unit + integration + load)
+├── alembic/versions/   # 001 → 010
+└── tests/              # 240 tests (unit + integration + load)
 frontend/
 ├── scripts/            # node --experimental-strip-types checks (CSV, timeago)
 └── src/
@@ -487,10 +491,10 @@ docker-compose.yml      # postgres, redis, gateway, prometheus, grafana
 ## Tests and gates
 
 ```bash
-# Backend — 227 tests, must be green
+# Backend — 240 tests, must be green
 cd backend
 python -m pytest tests/ -q
-ruff check reroute tests run.py
+ruff check reroute tests run.py scripts
 
 # Frontend — type check + lint + build
 cd frontend

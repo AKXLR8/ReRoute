@@ -6,6 +6,7 @@ Provider keys live at /auth/providers (per-user BYOK); user management stays adm
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import timedelta
 
@@ -13,10 +14,11 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import case, false, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth.auth import AuthContext, get_current_user
+from ..auth.auth import AuthContext, get_current_user, require_admin
 from ..circuit_breaker.circuit_breaker import CircuitBreakerRegistry
 from ..database import get_db
 from ..models.audit_log import AuditLog
+from ..observability.metrics import metrics_collector
 from ..timeutil import utc_today
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -74,6 +76,35 @@ async def list_audit_logs(
 async def admin_health(http_request: Request, auth: AuthContext = Depends(get_current_user)):
     circuit_breakers: CircuitBreakerRegistry = http_request.app.state.handler.circuit_breakers
     return {"circuit_breakers": await circuit_breakers.all_status(include_users=True)}
+
+
+@router.post("/health/refresh")
+async def refresh_health(
+    http_request: Request, auth: AuthContext = Depends(get_current_user)
+):
+    """Probe shared providers on demand. Vercel freezes background loops, so
+    operators/cron can refresh instead of waiting for an instance to thaw."""
+    require_admin(auth)
+    registry = http_request.app.state.registry
+
+    async def probe(name, provider):
+        try:
+            healthy = await asyncio.wait_for(provider.health_check(), timeout=10)
+        except Exception:
+            healthy = False
+        metrics_collector.set_provider_health(name, healthy)
+        return name, healthy
+
+    results = dict(
+        await asyncio.gather(
+            *(
+                probe(name, provider)
+                for name, provider in sorted(registry.all().items())
+                if provider.api_key or name == "ollama"
+            )
+        )
+    )
+    return {"providers": results}
 
 
 @router.get("/analytics")

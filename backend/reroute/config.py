@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     # Accounts: short-lived access JWT + rotating refresh cookie-less tokens
     access_expire_minutes: int = 15
     refresh_expire_days: int = 14
+    # delete revoked refresh rows after this many days; expired rows are deleted too
+    refresh_token_retention_days: int = 30
     login_max_attempts: int = 5
     login_lockout_minutes: int = 15
     login_rate_limit_per_ip: int = 10  # per minute per IP
