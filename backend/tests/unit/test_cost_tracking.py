@@ -58,7 +58,7 @@ def _make_handler(route_side_effect=None):
     provider.name = "openai"
     provider.estimate_cost.return_value = 0.0042
 
-    async def _route(request, _providers):
+    async def _route(request, _providers, scope=None):
         return provider, _response(), None
 
     router.route = AsyncMock(side_effect=route_side_effect or _route)

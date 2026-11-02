@@ -75,3 +75,25 @@ async def test_retry_records_metric_with_labels():
 
     assert result == "ok"
     mc.record_retry.assert_called_once_with("openai", "gpt-4o")
+
+
+@pytest.mark.asyncio
+async def test_retry_count_is_visible_on_provider():
+    engine = RetryEngine()
+    engine.max_attempts = 2
+    engine.base_delay = 0.0
+    import httpx
+
+    class Provider:
+        def __init__(self):
+            self.calls = 0
+
+        async def chat(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise httpx.TimeoutException("timeout")
+            return "ok"
+
+    provider = Provider()
+    assert await engine.execute(provider.chat) == "ok"
+    assert provider._retry_count == 1

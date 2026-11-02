@@ -84,6 +84,22 @@ async def lifespan(app: FastAPI):
         retry_on_timeout=True,
     )
     app.state.redis = redis
+    from .providers.byok import purge_legacy_cache
+
+    await purge_legacy_cache(redis)
+    # Optional split: cache entries are evictable, control state (rate limits,
+    # circuits, BYOK) is not. Reuse the main Redis when unset.
+    cache_redis = redis
+    if settings.cache_redis_url and settings.cache_redis_url != settings.redis_url:
+        cache_redis = _Redis.from_url(
+            settings.cache_redis_url,
+            decode_responses=False,
+            socket_connect_timeout=10,
+            socket_timeout=10,
+            health_check_interval=30,
+            retry_on_timeout=True,
+        )
+    app.state.cache_redis = cache_redis
 
     # Provider registry — shared templates only. Per-user BYOK clones are built
     # per request in byok.resolve_user(); the gateway's env keys are never routed
@@ -98,11 +114,14 @@ async def lifespan(app: FastAPI):
     registry.register(TogetherProvider(api_key=settings.together_api_key))
     registry.register(OllamaProvider(base_url=settings.ollama_base_url))
     app.state.registry = registry
+    metrics_collector.register_models(
+        [model for provider in registry.all().values() for model in provider.models()]
+    )
 
     # Core components
     retry_engine = RetryEngine()
     rate_limiter = RateLimiter(redis)
-    cache = SemanticCache(redis)
+    cache = SemanticCache(cache_redis)
     circuit_breakers = CircuitBreakerRegistry(redis)
     router = Router(registry, circuit_breakers, retry_engine)
 
@@ -176,6 +195,8 @@ async def lifespan(app: FastAPI):
         await invalidation_task
     await registry.aclose_all()
     await dispose_engine()
+    if cache_redis is not redis:
+        await cache_redis.aclose()
     await redis.aclose()
     shutdown()  # flush pending trace spans
     log.info("ReRouteAI stopped")

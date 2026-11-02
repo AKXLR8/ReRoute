@@ -21,6 +21,15 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["chat"])
 
 
+async def _close_providers(providers: list) -> None:
+    """Per-request BYOK clones own an httpx client; never leak it."""
+    for provider in providers:
+        try:
+            await provider.aclose()
+        except Exception:
+            log.debug("Failed to close provider client", exc_info=True)
+
+
 def _require_user(auth: AuthContext) -> str:
     """Per-user BYOK: chat/models need a signed-in account — no key-less paths."""
     if not auth.user_id:
@@ -79,6 +88,8 @@ async def chat_completions(
             except Exception:
                 log.exception("Unhandled error in stream")
                 yield f'data: {json.dumps({"error": "Internal error", "status": 500})}\n\n'
+            finally:
+                await _close_providers(providers)
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
     try:
@@ -94,3 +105,5 @@ async def chat_completions(
     except Exception:
         log.exception("Unhandled error in chat completions")
         raise HTTPException(status_code=500, detail="Internal error") from None
+    finally:
+        await _close_providers(providers)

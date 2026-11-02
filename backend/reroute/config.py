@@ -58,7 +58,15 @@ class Settings(BaseSettings):
     # --- Cache ---
     semantic_cache_threshold: float = 0.92
     semantic_cache_ttl_seconds: int = 3600
+    semantic_cache_max_entries: int = 500
+    # empty = reuse redis_url; set a separate instance/DB so cache eviction
+    # cannot delete rate-limit, circuit-breaker, or BYOK control state
+    cache_redis_url: str = ""
     embedding_model: str = "Xenova/all-MiniLM-L6-v2"
+
+    # --- BYOK ---
+    # instance cache holds decrypted keys in memory for a short time only
+    byok_cache_ttl_seconds: int = 300
 
     # --- Rate Limits (global — single-tenant gateway) ---
     default_rate_limit_rpm: int = 60
@@ -72,6 +80,10 @@ class Settings(BaseSettings):
     # --- Retry ---
     retry_max_attempts: int = 3
     retry_base_delay: float = 0.5
+    retry_max_delay: float = 20.0
+
+    # --- Audit retention ---
+    audit_retention_days: int = 365
 
     # --- Security ---
     max_request_body_bytes: int = 1_048_576  # 1 MiB default

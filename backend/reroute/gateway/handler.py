@@ -5,6 +5,7 @@ Authenticate → Rate limit → Policy → Route → Call provider → Audit →
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -79,9 +80,41 @@ class GatewayHandler:
     ) -> ChatResponse:
         scope = _scope(auth)
         t0 = time.monotonic()
+        acquired = False
+
+        async def _on_coalesced(response: ChatResponse) -> None:
+            """A deduped request consumed no provider tokens, but it still needs
+            its own id, audit row, and metrics sample."""
+            response_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            response.id = response_id
+            response.trace_id = response_id
+            metrics_collector.record_request(
+                provider=response.provider,
+                model=request.model,
+                status="deduped",
+                team_id=scope,
+                latency_s=time.monotonic() - t0,
+            )
+            await self._audit_deduped(
+                db, request, response, _uid(auth), time.monotonic() - t0
+            )
+
         try:
+            # Meter every request before dedup so a coalesced caller cannot
+            # bypass RPM/TPM/concurrency by arriving second.
+            await self.rate_limiter.check_rpm(f"{scope}:rpm", self.rpm)
+            est_tokens = sum(len(flatten_text(m.content)) // 4 for m in request.messages)
+            await self.rate_limiter.check_tpm(f"{scope}:tpm", self.tpm, est_tokens or 100)
+            await self.rate_limiter.check_concurrent(f"{scope}:concurrent", self.conc)
+            acquired = True
             return await self.dedup.execute(
-                scope, request, self._handle_chat_inner, db, auth, providers
+                scope,
+                request,
+                self._handle_chat_inner,
+                db,
+                auth,
+                providers,
+                on_coalesced=_on_coalesced,
             )
         except Exception as exc:
             # ponytail: error-rate alerts need failures counted, not just successes
@@ -102,6 +135,9 @@ class GatewayHandler:
                 db, auth, request, status_code, f"{type(exc).__name__}: {exc}"
             )
             raise
+        finally:
+            if acquired:
+                await self.rate_limiter.release_concurrent(f"{scope}:concurrent")
 
     async def _handle_chat_inner(
         self,
@@ -114,137 +150,131 @@ class GatewayHandler:
         t0 = time.monotonic()
         scope = _scope(auth)
 
-        # --- Rate limiting first: every authenticated request is metered, even
-        # cache hits and guard violations ---
-        await self.rate_limiter.check_rpm(f"{scope}:rpm", self.rpm)
-        est_tokens = sum(len(flatten_text(m.content)) // 4 for m in request.messages)
-        await self.rate_limiter.check_tpm(f"{scope}:tpm", self.tpm, est_tokens or 100)
-        await self.rate_limiter.check_concurrent(f"{scope}:concurrent", self.conc)
-
+        # Rate limiting happens in handle_chat(), before dedup, so coalesced
+        # callers are metered too. Concurrency is released there as well.
+        # --- Prompt guardrails (before cache: blocked models are never served) ---
+        msg_dicts = [m.model_dump() for m in request.messages]
         try:
-            # --- Prompt guardrails (before cache: blocked models are never served) ---
-            msg_dicts = [m.model_dump() for m in request.messages]
-            try:
-                self.guard.check(msg_dicts)
-            except GuardrailViolation as e:
-                log.warning("Guardrail violation: %s", e)
-                metrics_collector.record_request(
-                    provider="gateway",
-                    model=request.model,
-                    status="blocked",
-                    team_id=scope,
-                    latency_s=time.monotonic() - t0,
-                )
-                await self._audit_failure(
-                    db, auth, request, 403, f"GuardrailViolation[{e.rule}]: {e.detail}"
-                )
-                return ChatResponse(
-                    id=request_id,
-                    model=request.model,
-                    choices=[{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": f"Request blocked: {e.detail}"},
-                        "finish_reason": "stop",
-                    }],
-                    provider="gateway",
-                    latency_ms=0,
-                )
-
-            # --- Semantic cache (per user: never serve another account's completion) ---
-            cached = await self.cache.get(request, scope=scope)
-            if cached:
-                resp_data = dict(cached)  # cache.get() returns the response payload
-                resp_data["cached"] = True
-                resp_data["id"] = request_id
-                saved = self._cache_savings(resp_data, providers, request.model)
-                metrics_collector.record_cache_hit(cost_saved=saved)
-                metrics_collector.record_request(
-                    provider="gateway",
-                    model=request.model,
-                    status="cached",
-                    team_id=scope,
-                    latency_s=time.monotonic() - t0,
-                )
-                await self._audit_cached(db, request, resp_data, request_id, _uid(auth), saved)
-                return ChatResponse(**resp_data)
-            metrics_collector.record_cache_miss()
-
-            # --- Route + call (candidates = this user's BYOK providers only).
-            # route() performs the provider call (retry + breaker inside) and
-            # returns the response — calling chat() again would double-spend.
-            provider, response, fallback_from = await self.router.route(request, providers)
-
-            response.id = request_id
-            response.trace_id = request_id
-
-            # --- Output guardrails (secrets only: models echoing keys is a leak,
-            # PII/injection here would false-positive on legit discussion) ---
-            out_text = " ".join(
-                c.message.content or ""
-                for c in response.choices
-                if isinstance(getattr(c.message, "content", None), str)
+            self.guard.check(msg_dicts)
+        except GuardrailViolation as e:
+            log.warning("Guardrail violation: %s", e)
+            metrics_collector.record_request(
+                provider="gateway",
+                model=request.model,
+                status="blocked",
+                team_id=scope,
+                latency_s=time.monotonic() - t0,
             )
-            try:
-                self.output_guard.check([{"content": out_text}])
-            except GuardrailViolation as e:
-                log.warning("Output guardrail violation: %s", e)
-                # provider already charged for these tokens — audit + metrics both count them
-                cost = await self._audit_log(
-                    db, request, response, provider, fallback_from, request_id, _uid(auth)
-                )
-                metrics_collector.record_request(
-                    provider=provider.name,
-                    model=request.model,
-                    status="blocked",
-                    team_id=scope,
-                    latency_s=time.monotonic() - t0,
-                    input_tokens=response.usage.prompt_tokens if response.usage else 0,
-                    output_tokens=response.usage.completion_tokens if response.usage else 0,
-                    cost=cost,
-                )
-                return ChatResponse(
-                    id=request_id,
-                    model=request.model,
-                    choices=[{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": f"Request blocked: {e.detail}"},
-                        "finish_reason": "stop",
-                    }],
-                    provider="gateway",
-                    latency_ms=0,
-                )
+            await self._audit_failure(
+                db, auth, request, 403, f"GuardrailViolation[{e.rule}]: {e.detail}"
+            )
+            return ChatResponse(
+                id=request_id,
+                model=request.model,
+                choices=[{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": f"Request blocked: {e.detail}"},
+                    "finish_reason": "stop",
+                }],
+                provider="gateway",
+                latency_ms=0,
+            )
 
-            # --- Audit log ---
-            finish_reason = response.choices[0].finish_reason if response.choices else None
+        # --- Semantic cache (per user: never serve another account's completion) ---
+        cached = await self.cache.get(request, scope=scope)
+        if cached:
+            resp_data = dict(cached)  # cache.get() returns the response payload
+            resp_data["cached"] = True
+            resp_data["id"] = request_id
+            saved = self._cache_savings(resp_data, providers, request.model)
+            metrics_collector.record_cache_hit(cost_saved=saved)
+            metrics_collector.record_request(
+                provider="gateway",
+                model=request.model,
+                status="cached",
+                team_id=scope,
+                latency_s=time.monotonic() - t0,
+            )
+            await self._audit_cached(db, request, resp_data, request_id, _uid(auth), saved)
+            return ChatResponse(**resp_data)
+        metrics_collector.record_cache_miss()
+
+        # --- Route + call (candidates = this user's BYOK providers only).
+        # route() performs the provider call (retry + breaker inside) and
+        # returns the response — calling chat() again would double-spend.
+        provider, response, fallback_from = await self.router.route(
+            request, providers, scope=scope
+        )
+
+        response.id = request_id
+        response.trace_id = request_id
+
+        # --- Output guardrails (secrets only: models echoing keys is a leak,
+        # PII/injection here would false-positive on legit discussion) ---
+        out_text = " ".join(
+            c.message.content or ""
+            for c in response.choices
+            if isinstance(getattr(c.message, "content", None), str)
+        )
+        try:
+            self.output_guard.check([{"content": out_text}])
+        except GuardrailViolation as e:
+            log.warning("Output guardrail violation: %s", e)
+            # provider already charged for these tokens — audit + metrics both count them
             cost = await self._audit_log(
-                db, request, response, provider, fallback_from, request_id, _uid(auth),
-                finish_reason=finish_reason,
+                db, request, response, provider, fallback_from, request_id, _uid(auth)
             )
-
-            # --- Metrics ---
-            total_latency = time.monotonic() - t0
             metrics_collector.record_request(
                 provider=provider.name,
                 model=request.model,
-                status="success",
+                status="blocked",
                 team_id=scope,
-                latency_s=total_latency,
+                latency_s=time.monotonic() - t0,
                 input_tokens=response.usage.prompt_tokens if response.usage else 0,
                 output_tokens=response.usage.completion_tokens if response.usage else 0,
                 cost=cost,
             )
-            if finish_reason:
-                metrics_collector.record_finish_reason(provider.name, request.model, finish_reason)
-            if fallback_from:
-                metrics_collector.record_fallback(fallback_from, provider.name)
+            return ChatResponse(
+                id=request_id,
+                model=request.model,
+                choices=[{
+                    "index": 0,
+                    "message": {"role": "assistant", "content": f"Request blocked: {e.detail}"},
+                    "finish_reason": "stop",
+                }],
+                provider="gateway",
+                latency_ms=0,
+            )
 
-            # --- Cache store ---
-            await self.cache.set(request, response.model_dump(), scope=scope)
+        # --- Audit log ---
+        finish_reason = response.choices[0].finish_reason if response.choices else None
+        cost = await self._audit_log(
+            db, request, response, provider, fallback_from, request_id, _uid(auth),
+            finish_reason=finish_reason,
+        )
 
-            return response
+        # --- Metrics ---
+        total_latency = time.monotonic() - t0
+        metrics_collector.record_request(
+            provider=provider.name,
+            model=request.model,
+            status="success",
+            team_id=scope,
+            latency_s=total_latency,
+            input_tokens=response.usage.prompt_tokens if response.usage else 0,
+            output_tokens=response.usage.completion_tokens if response.usage else 0,
+            cost=cost,
+        )
+        if finish_reason:
+            metrics_collector.record_finish_reason(provider.name, request.model, finish_reason)
+        if fallback_from:
+            metrics_collector.record_fallback(fallback_from, provider.name)
 
-        finally:
-            await self.rate_limiter.release_concurrent(f"{scope}:concurrent")
+        # --- Cache store ---
+        await self.cache.set(request, response.model_dump(), scope=scope)
+
+        return response
+
 
     async def handle_stream(
         self,
@@ -327,7 +357,9 @@ class GatewayHandler:
             metrics_collector.record_cache_miss()
 
             # --- Route ---
-            provider, fallback_from = await self.router.route_stream(request, providers)
+            provider, fallback_from = await self.router.route_stream(
+                request, providers, scope=scope
+            )
 
             # span duration includes client backpressure; TTFT is set separately
             # from the first content chunk
@@ -478,6 +510,8 @@ class GatewayHandler:
                 await db.commit()
             except Exception:
                 log.exception("Failed to write stream audit row")
+                with contextlib.suppress(Exception):
+                    await db.rollback()
 
     async def _audit_failure(
         self,
@@ -529,6 +563,9 @@ class GatewayHandler:
                 request.model,
             )
 
+        retry_count = getattr(provider, "_retry_count", 0)
+        if not isinstance(retry_count, int):
+            retry_count = 0
         log_entry = AuditLog(
             user_id=user_id,
             provider=provider.name,
@@ -539,6 +576,7 @@ class GatewayHandler:
             cost_usd=cost,
             latency_ms=response.latency_ms,
             finish_reason=finish_reason,
+            retry_count=retry_count,
             prompt_hash=hashlib.sha256(
                 json.dumps(
                     [m.model_dump() for m in request.messages], sort_keys=True
@@ -548,8 +586,15 @@ class GatewayHandler:
             trace_id=trace_id,
             status_code=200,
         )
-        db.add(log_entry)
-        await db.commit()
+        try:
+            db.add(log_entry)
+            await db.commit()
+        except Exception:
+            # The provider already answered and charged tokens. A DB blip must
+            # not turn that success into a 500.
+            log.exception("Failed to write success audit row")
+            with contextlib.suppress(Exception):
+                await db.rollback()
         return cost
 
     @staticmethod
@@ -572,6 +617,42 @@ class GatewayHandler:
         return prov.estimate_cost(
             usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0), model
         )
+
+    async def _audit_deduped(
+        self,
+        db: AsyncSession,
+        request: ChatRequest,
+        response: ChatResponse,
+        user_id: uuid.UUID | None,
+        latency_s: float,
+    ) -> None:
+        """Coalesced request: no provider spend, but it still happened."""
+        try:
+            db.add(
+                AuditLog(
+                    user_id=user_id,
+                    provider=response.provider,
+                    model_requested=request.model,
+                    model_served=response.model,
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_usd=0.0,
+                    latency_ms=latency_s * 1000,
+                    is_deduped=True,
+                    prompt_hash=hashlib.sha256(
+                        json.dumps(
+                            [m.model_dump() for m in request.messages], sort_keys=True
+                        ).encode()
+                    ).hexdigest(),
+                    trace_id=response.id,
+                    status_code=200,
+                )
+            )
+            await db.commit()
+        except Exception:
+            log.exception("Failed to write deduped audit row")
+            with contextlib.suppress(Exception):
+                await db.rollback()
 
     async def _audit_cached(
         self,
@@ -612,3 +693,5 @@ class GatewayHandler:
             await db.commit()
         except Exception:
             log.exception("Failed to write cache-hit audit row")
+            with contextlib.suppress(Exception):
+                await db.rollback()

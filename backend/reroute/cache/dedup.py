@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import copy
 import hashlib
 import json
 from typing import Any
 
 from ..schemas.chat import ChatRequest
+
+
+class _LeaderCancelled(Exception):
+    """The in-flight leader vanished — a waiter should try again."""
 
 
 class RequestDeduplicator:
@@ -38,18 +44,32 @@ class RequestDeduplicator:
         request: ChatRequest,
         func,
         *args,
+        on_coalesced=None,
         **kwargs,
     ) -> Any:
         """Execute func(request) — deduplicating concurrent identical calls.
 
         `scope` isolates tenants: identical requests from different scopes
-        never share a response.
+        never share a response. `on_coalesced(result)` runs for waiters so they
+        still get their own audit/metrics row.
         """
         key = self._hash(scope, request)
 
         if key in self._in_flight:
             # Another request is already in flight — wait for it
-            return await self._in_flight[key]
+            try:
+                result = await self._in_flight[key]
+            except _LeaderCancelled:
+                # The leader was cancelled (client disconnect). Become the
+                # leader instead of hanging forever on a future nobody fills.
+                return await self.execute(
+                    scope, request, func, *args, on_coalesced=on_coalesced, **kwargs
+                )
+            with contextlib.suppress(Exception):
+                result = copy.deepcopy(result)
+            if on_coalesced is not None:
+                await on_coalesced(result)
+            return result
 
         # We are the first — create the future
         loop = asyncio.get_event_loop()
@@ -58,13 +78,19 @@ class RequestDeduplicator:
 
         try:
             result = await func(request, *args, **kwargs)
-            future.set_result(result)
+            if not future.done():
+                future.set_result(result)
             return result
-        except Exception as exc:
-            future.set_exception(exc)
-            # nobody may ever await this future — mark retrieved so GC doesn't
-            # log "Future exception was never retrieved"; real waiters still get it
-            future.add_done_callback(lambda f: f.exception())
+        except BaseException as exc:
+            if not future.done():
+                # CancelledError is BaseException and must not be set on the
+                # future (it would look like every waiter was cancelled).
+                future.set_exception(
+                    _LeaderCancelled() if isinstance(exc, asyncio.CancelledError) else exc
+                )
+                future.add_done_callback(
+                    lambda f: None if f.cancelled() else f.exception()
+                )
             raise
         finally:
             self._in_flight.pop(key, None)

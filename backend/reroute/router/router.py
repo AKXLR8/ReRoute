@@ -29,7 +29,11 @@ class Router:
         self.retry = retry_engine
 
     async def _candidates(
-        self, model: str, providers: list[Provider], preferred: str | None = None
+        self,
+        model: str,
+        providers: list[Provider],
+        preferred: str | None = None,
+        scope: str | None = None,
     ) -> list[Provider]:
         """Filter the caller's (per-user) providers by model support, explicit
         preference, circuit breaker. `providers` is already BYOK-resolved —
@@ -37,16 +41,20 @@ class Router:
         candidates = [p for p in providers if p.supports_model(model) and p.health.available]
         if preferred:
             candidates = [p for p in candidates if p.name == preferred]
-        # Filter out providers with open circuits
+        # Filter out providers with open circuits. Scope prevents one user's
+        # bad key from opening the circuit for every other account.
         filtered = []
         for p in candidates:
-            cb = self.circuit_breakers.get(p.name)
+            cb = self.circuit_breakers.get(p.name, scope)
             if await cb.is_available:
                 filtered.append(p)
         return sorted(filtered, key=lambda p: p.health.latency_ms)
 
     async def route(
-        self, request: ChatRequest, providers: list[Provider]
+        self,
+        request: ChatRequest,
+        providers: list[Provider],
+        scope: str | None = None,
     ) -> tuple[Provider, ChatResponse, str | None]:
         """Return (provider, response, fallback_from_provider_name_or_None).
 
@@ -56,7 +64,9 @@ class Router:
         Tries each candidate in order (sorted by latency). Returns the first
         that succeeds. Raises the last exception if all fail.
         """
-        candidates = await self._candidates(request.model, providers, request.provider)
+        candidates = await self._candidates(
+            request.model, providers, request.provider, scope
+        )
         if not candidates:
             raise ValueError(
                 f"No available provider for model '{request.model}' — "
@@ -68,7 +78,7 @@ class Router:
 
         for provider in candidates:
             try:
-                async with self.circuit_breakers.get(provider.name):
+                async with self.circuit_breakers.get(provider.name, scope):
                     with tracer.start_as_current_span("llm.chat") as span:
                         span.set_attribute("gen_ai.operation.name", "chat")
                         span.set_attribute("gen_ai.provider.name", provider.name)
@@ -103,11 +113,16 @@ class Router:
         raise last_exc or ValueError("All providers failed")
 
     async def route_stream(
-        self, request: ChatRequest, providers: list[Provider]
+        self,
+        request: ChatRequest,
+        providers: list[Provider],
+        scope: str | None = None,
     ) -> tuple[Provider, str | None]:
         """Same as route() but for streaming — skips retry (streaming retry is complex).
         Does still apply circuit-breaker health via candidates ordering."""
-        candidates = await self._candidates(request.model, providers, request.provider)
+        candidates = await self._candidates(
+            request.model, providers, request.provider, scope
+        )
         if not candidates:
             raise ValueError(
                 f"No available provider for model '{request.model}' — "
@@ -116,7 +131,7 @@ class Router:
 
         fallback_from: str | None = None
         for provider in candidates:
-            cb = self.circuit_breakers.get(provider.name)
+            cb = self.circuit_breakers.get(provider.name, scope)
             if not await cb.is_available:
                 continue
             try:

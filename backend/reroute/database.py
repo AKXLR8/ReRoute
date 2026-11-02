@@ -5,6 +5,7 @@ Lazy — env vars are read on first use, not at import time.
 
 from __future__ import annotations
 
+import os
 import ssl
 from urllib.parse import parse_qs, urlparse, urlunparse
 
@@ -61,11 +62,20 @@ def get_engine() -> AsyncEngine:
     if _engine is None:
         settings = get_settings()
         clean_url, connect_args = _build_async_engine_url_and_args(settings.database_url)
+        pool_size = settings.database_pool_size
+        max_overflow = settings.database_max_overflow
+        if os.environ.get("VERCEL"):
+            # Every serverless instance gets its own pool; keep it tiny and use
+            # Neon's pooled connection string, or a traffic spike exhausts the DB.
+            pool_size = min(pool_size, 3)
+            max_overflow = min(max_overflow, 2)
         _engine = create_async_engine(
             clean_url,
-            pool_size=settings.database_pool_size,
-            max_overflow=settings.database_max_overflow,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
             pool_pre_ping=True,
+            pool_recycle=300,
+            pool_timeout=10,
             echo=settings.debug,
             connect_args=connect_args,
         )

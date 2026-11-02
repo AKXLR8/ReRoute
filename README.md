@@ -74,9 +74,9 @@ flowchart LR
 
     subgraph GW["ReRouteAI gateway (FastAPI)"]
         direction LR
-        Auth["Auth"] --> Dedup["Dedup"]
-        Dedup --> RL["Rate limit<br/>RPM · TPM · concurrent"]
-        RL --> Guard["Input<br/>guardrails"]
+        Auth["Auth"] --> RL["Rate limit<br/>RPM · TPM · concurrent"]
+        RL --> Dedup["Dedup"]
+        Dedup --> Guard["Input<br/>guardrails"]
         Guard --> Cache{"Semantic<br/>cache"}
         Cache -->|"hit (0 tokens)"| Return["Return"]
         Cache -->|miss| Router["Route<br/>breaker · retry · fallback"]
@@ -96,18 +96,18 @@ flowchart LR
     Prov --> PROVS
 
     GW <--> PG[("Postgres<br/>users · audit_logs<br/>provider_keys · api_keys")]
-    GW <--> RD[("Redis<br/>rate limits · cache<br/>dedup · throttle")]
+    GW <--> RD[("Redis<br/>rate limits · cache<br/>circuits · BYOK cache")]
     GW --> PROM["Prometheus → Grafana<br/>15 forge_* metrics<br/>(admin-only /metrics)"]
     GW --> STAT["Public /status<br/>aggregate health · 10s cache"]
 
-    NOTE["SSE stream path: rate limit → guard → provider only<br/>(no dedup, no cache)"]
+    NOTE["SSE stream path: rate limit → guard → cache replay/store → provider<br/>(no dedup)"]
     NOTE -.-> GW
 ```
 
-Request pipeline (non-stream): **dedup → rate limit → input guardrails →
+Request pipeline (non-stream): **rate limit → dedup → input guardrails →
 semantic cache → route (circuit breaker + retry + fallback) → provider →
 output guardrails → audit → metrics → cache store**. Streams run rate limit →
-guard → provider and skip dedup + cache (an answer is never replayed). The public
+guard → cache (replay or store) → provider and skip dedup. The public
 `/status` feed is a separate read path — it reports aggregate checks only.
 
 ## Quick Start
@@ -267,8 +267,9 @@ wildcard allowed hosts.
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `DATABASE_URL` | `postgresql+asyncpg://forge:forge@localhost:5432/reroute` | |
-| `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | `20` / `10` | asyncpg pool sizing |
-| `REDIS_URL` | `redis://localhost:6379/0` | |
+| `DATABASE_POOL_SIZE` / `DATABASE_MAX_OVERFLOW` | `20` / `10` | asyncpg pool sizing; capped at `3` / `2` on Vercel |
+| `REDIS_URL` | `redis://localhost:6379/0` | control state: rate limits, circuits, BYOK |
+| `CACHE_REDIS_URL` | empty | optional separate Redis/DB for evictable cache state |
 | `JWT_SECRET` | `change-me-in-production` | signs account tokens; 32+ chars required in prod |
 | `FERNET_KEY` | — | BYOK key encryption. Falls back to `JWT_SECRET` if unset (legacy) |
 | `ADMIN_API_KEY` | `change-me-admin-key` | setup, legacy `X-API-Key`, and admin `/metrics` scraping |
@@ -286,9 +287,12 @@ wildcard allowed hosts.
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | keyless, available to every account |
 | `DEFAULT_RATE_LIMIT_RPM` / `_TPM` / `_CONCURRENT` | `60` / `100000` / `10` | applied per user, not per plan |
 | `SEMANTIC_CACHE_THRESHOLD` / `_TTL_SECONDS` | `0.92` / `3600` | cache is scoped per user |
+| `SEMANTIC_CACHE_MAX_ENTRIES` | `500` | bounded nearest-neighbour index per user/model/params |
+| `BYOK_CACHE_TTL_SECONDS` | `300` | encrypted provider-instance cache lifetime |
 | `EMBEDDING_MODEL` | `Xenova/all-MiniLM-L6-v2` | ONNX model behind semantic-cache matching |
 | `CIRCUIT_BREAKER_FAILURE_THRESHOLD` / `_RECOVERY_SECONDS` | `5` / `30` | |
-| `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_DELAY` | `3` / `0.5` | |
+| `RETRY_MAX_ATTEMPTS` / `RETRY_BASE_DELAY` / `RETRY_MAX_DELAY` | `3` / `0.5` / `20` | honors `Retry-After`, capped by `RETRY_MAX_DELAY` |
+| `AUDIT_RETENTION_DAYS` | `365` | used by `scripts/purge_audit.py --apply` |
 | `MAX_REQUEST_BODY_BYTES` | `1048576` | 413 above this |
 | `ALLOW_PRIVATE_BASE_URLS` | `false` | blocks RFC1918/link-local/metadata in `base_url` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | — | OTLP/HTTP collector URL (port 4318). Empty = tracing off |
@@ -394,9 +398,9 @@ Two independent layers:
 **Metrics (on, admin-only).** Prometheus counters/histograms/gauges for requests,
 tokens, cost, retries, fallbacks, cache hits + $-savings, circuit-breaker state
 and provider health — 15 `forge_*` families at `GET /metrics`. The endpoint
-requires an admin session token or the admin `X-API-Key`: it used to be public,
-but the `team_id` labels contain user UUIDs and per-user spend. Token counts are
-provider-reported (including streams); cost is estimated from the
+requires an admin session token or the admin `X-API-Key`. Labels are bounded
+and no longer carry per-user UUIDs; per-user spend/tokens live in Postgres.
+Token counts are provider-reported (including streams); cost is estimated from the
 per-model list prices in `providers/*_provider.py`. Streamed requests also
 record TTFT (`forge_ttft_seconds`), output tokens/sec
 (`forge_output_tokens_per_second`), and finish_reason

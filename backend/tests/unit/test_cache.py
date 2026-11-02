@@ -3,7 +3,12 @@
 import fakeredis.aioredis
 import pytest
 
-from reroute.cache.semantic_cache import SemanticCache, _cosine_sim, _embed_text
+from reroute.cache.semantic_cache import (
+    SemanticCache,
+    _cosine_sim,
+    _embed_text,
+    _params_key,
+)
 from reroute.schemas.chat import ChatMessage, ChatRequest
 
 
@@ -141,3 +146,34 @@ async def test_cache_semantic_respects_sampling_params(redis):
         temperature=1.5,
     )
     assert await cache.get(req2) is None
+
+
+@pytest.mark.asyncio
+async def test_cache_never_collides_across_roles(redis):
+    """Same text in a different role must not replay the other role's answer."""
+    cache = SemanticCache(redis)
+    cache.threshold = 0.99
+    user_req = ChatRequest(model="gpt-4o", messages=[ChatMessage(role="user", content="hello")])
+    await cache.set(user_req, {"answer": "user-answer"})
+
+    system_req = ChatRequest(
+        model="gpt-4o", messages=[ChatMessage(role="system", content="hello")]
+    )
+    assert await cache.get(system_req) is None
+
+
+@pytest.mark.asyncio
+async def test_cache_namespace_is_bounded(redis):
+    cache = SemanticCache(redis)
+    cache.max_entries = 2
+    cache.threshold = 0.0
+    for i in range(4):
+        req = ChatRequest(
+            model="gpt-4o", messages=[ChatMessage(role="user", content=f"text {i}")]
+        )
+        await cache.set(req, {"answer": i})
+    last = ChatRequest(
+        model="gpt-4o", messages=[ChatMessage(role="user", content="text 3")]
+    )
+    ns = cache._namespace("global", "gpt-4o", _params_key(last))
+    assert await redis.zcard(f"{ns}:lru") == 2

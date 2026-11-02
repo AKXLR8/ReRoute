@@ -13,6 +13,7 @@ workers see key changes instantly.
 from __future__ import annotations
 
 import base64
+import contextlib
 import copy
 import hashlib
 import json
@@ -33,8 +34,10 @@ from .base import Provider, ProviderHealth
 
 log = logging.getLogger(__name__)
 
-# Redis keys/prefixes
-_INST_PREFIX = "byok:instances:"
+# Redis keys/prefixes. v2 stores a Fernet-encrypted payload with a TTL; the
+# legacy prefix held plaintext keys, so it is purged whenever a user is touched.
+_INST_PREFIX = "byok:instances:v2:"
+_LEGACY_INST_PREFIX = "byok:instances:"
 _INVAL_CHANNEL = "byok:invalidate"
 
 
@@ -123,6 +126,39 @@ def _instance_key(user_id: str) -> str:
     return f"{_INST_PREFIX}{user_id}"
 
 
+def _legacy_instance_key(user_id: str) -> str:
+    return f"{_LEGACY_INST_PREFIX}{user_id}"
+
+
+def _serialize_instances(out: list[Provider]) -> str:
+    payload = json.dumps([
+        {"provider": p.name, "api_key": p.api_key, "base_url": p.base_url}
+        for p in out
+    ])
+    return encrypt_key(payload)
+
+
+async def _cache_instances(redis: Redis, user_id: str, out: list[Provider]) -> None:
+    ttl = get_settings().byok_cache_ttl_seconds
+    await redis.set(_instance_key(user_id), _serialize_instances(out), ex=ttl)
+
+
+async def purge_legacy_cache(redis: Redis) -> None:
+    """Best-effort one-time removal of the old plaintext instance cache."""
+    marker = "byok:legacy_purged"
+    try:
+        if not await redis.set(marker, "1", nx=True):
+            return
+        async for key in redis.scan_iter(match=f"{_LEGACY_INST_PREFIX}*", count=100):
+            name = key.decode() if isinstance(key, bytes) else key
+            if not name.startswith(_INST_PREFIX):
+                await redis.delete(key)
+    except Exception:
+        log.warning("Failed to purge legacy BYOK cache", exc_info=True)
+        with contextlib.suppress(Exception):
+            await redis.delete(marker)
+
+
 async def _publish_invalidate(redis: Redis, user_id: str) -> None:
     await redis.publish(_INVAL_CHANNEL, user_id)
 
@@ -152,13 +188,11 @@ async def _warm_instance_cache(redis: Redis, user_id: str, registry, db: AsyncSe
 
     ollama = registry.get("ollama")
     if ollama is not None and "ollama" not in seen:
-        out.append(ollama)  # keyless: usable by every account
+        # per-request clone too — the shared template's client must never be
+        # closed or have its health mutated by a user request
+        out.append(clone_with_key(ollama, "", None))
 
-    data = json.dumps([
-        {"provider": p.name, "api_key": p.api_key, "base_url": p.base_url}
-        for p in out
-    ])
-    await redis.set(_instance_key(user_id), data)
+    await _cache_instances(redis, user_id, out)
 
 
 async def _invalidate_handler(redis: Redis, registry, session_factory):
@@ -212,25 +246,34 @@ async def resolve_user(redis: Redis, user_id: str, registry, db: AsyncSession) -
     Cached in Redis; connect/disconnect/delete invalidate via pub/sub.
     Unreadable keys (rotated JWT_SECRET) are skipped with a warning, not a crash.
     """
+    # Remove the old plaintext entry as soon as this account is touched.
+    await redis.delete(_legacy_instance_key(user_id))
+
     # Try Redis cache first
     cached = await redis.get(_instance_key(user_id))
     if cached:
-        data = json.loads(cached)
-        out: list[Provider] = []
-        for item in data:
-            shared = registry.get(item["provider"])
-            if shared is None:
-                continue
-            p = copy.copy(shared)
-            p.api_key = item["api_key"]
-            p.base_url = item["base_url"] or ""
-            p._client = None
-            p.health = ProviderHealth()
-            out.append(p)
-        return out
+        try:
+            token = cached.decode() if isinstance(cached, bytes) else cached
+            data = json.loads(decrypt_key(token))
+            out: list[Provider] = []
+            for item in data:
+                shared = registry.get(item["provider"])
+                if shared is None:
+                    continue
+                p = copy.copy(shared)
+                p.api_key = item["api_key"]
+                p.base_url = item["base_url"] or ""
+                p._client = None
+                p.health = ProviderHealth()
+                out.append(p)
+            return out
+        except Exception:
+            # rotated FERNET_KEY / corrupt entry: rebuild from the encrypted DB rows
+            log.warning("Unreadable BYOK instance cache for %s; rebuilding", user_id)
+            await redis.delete(_instance_key(user_id))
 
     # Cache miss — build from DB
-    out: list[Provider] = []
+    out = []
     seen: set[str] = set()
     for row in await list_keys(db, user_id):
         shared = registry.get(row.provider)
@@ -246,14 +289,9 @@ async def resolve_user(redis: Redis, user_id: str, registry, db: AsyncSession) -
 
     ollama = registry.get("ollama")
     if ollama is not None and "ollama" not in seen:
-        out.append(ollama)
+        out.append(clone_with_key(ollama, "", None))
 
-    # Cache for next time
-    data = json.dumps([
-        {"provider": p.name, "api_key": p.api_key, "base_url": p.base_url}
-        for p in out
-    ])
-    await redis.set(_instance_key(user_id), data)
+    await _cache_instances(redis, user_id, out)
     return out
 
 
@@ -304,7 +342,7 @@ async def connect(
     await db.refresh(row)
 
     # Invalidate cache across all workers (pub/sub) + local immediate delete
-    await redis.delete(_instance_key(user_id))
+    await redis.delete(_instance_key(user_id), _legacy_instance_key(user_id))
     await _publish_invalidate(redis, user_id)
     return row
 
@@ -322,7 +360,7 @@ async def disconnect(db: AsyncSession, user_id: str, provider: str, redis: Redis
     await db.commit()
 
     # Invalidate cache across all workers (pub/sub) + local immediate delete
-    await redis.delete(_instance_key(user_id))
+    await redis.delete(_instance_key(user_id), _legacy_instance_key(user_id))
     await _publish_invalidate(redis, user_id)
 
 

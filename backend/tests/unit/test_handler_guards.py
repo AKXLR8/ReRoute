@@ -45,7 +45,7 @@ def _make_handler(provider=None):
     provider.stream = _one_chunk
 
     # route() owns the provider call in production — mirror that here
-    async def _route(request, _providers):
+    async def _route(request, _providers, scope=None):
         return provider, await provider.chat(request), None
 
     router.route = AsyncMock(side_effect=_route)

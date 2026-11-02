@@ -26,7 +26,7 @@ def _make_handler(provider_chat):
 
     # route() owns the provider call in production — mirror that here so the
     # await_count assertions still prove exactly one upstream call happens.
-    async def _route(request, _providers):
+    async def _route(request, _providers, scope=None):
         return provider, await provider.chat(request), None
 
     router.route = AsyncMock(side_effect=_route)
@@ -83,8 +83,11 @@ async def test_concurrent_duplicates_coalesce():
         handler.handle_chat(_request(), db, _AUTH, _PROVIDERS),
     )
 
-    assert r1.id == r2.id
+    assert r1.id != r2.id
     assert provider_chat.await_count == 1
+    rows = [c.args[0] for c in db.add.call_args_list]
+    assert len(rows) == 2
+    assert sum(bool(row.is_deduped) for row in rows) == 1
 
 
 async def test_real_router_calls_provider_exactly_once():

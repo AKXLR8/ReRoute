@@ -61,6 +61,7 @@ async def list_audit_logs(
             "error_message": lg.error_message,
             "ttft_ms": lg.ttft_ms, "tokens_per_sec": lg.tokens_per_sec,
             "finish_reason": lg.finish_reason, "is_cached": lg.is_cached,
+            "is_deduped": lg.is_deduped,
             "cache_saved_usd": lg.cache_saved_usd, "trace_id": lg.trace_id,
             "fallback_from": lg.fallback_from, "retry_count": lg.retry_count,
             "is_stream": lg.is_stream,
@@ -72,7 +73,7 @@ async def list_audit_logs(
 @router.get("/health")
 async def admin_health(http_request: Request, auth: AuthContext = Depends(get_current_user)):
     circuit_breakers: CircuitBreakerRegistry = http_request.app.state.handler.circuit_breakers
-    return {"circuit_breakers": await circuit_breakers.all_status()}
+    return {"circuit_breakers": await circuit_breakers.all_status(include_users=True)}
 
 
 @router.get("/analytics")

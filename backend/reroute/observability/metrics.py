@@ -8,19 +8,19 @@ from prometheus_client import Counter, Gauge, Histogram
 REQUEST_TOTAL = Counter(
     "forge_requests_total",
     "Total requests processed",
-    ["provider", "model", "status", "team_id"],
+    ["provider", "model", "status"],
 )
 
 TOKENS_TOTAL = Counter(
     "forge_tokens_total",
     "Total tokens consumed",
-    ["provider", "model", "team_id", "direction"],
+    ["provider", "model", "direction"],
 )
 
 COST_TOTAL = Counter(
     "forge_cost_usd_total",
     "Total cost in USD",
-    ["provider", "model", "team_id"],
+    ["provider", "model"],
 )
 
 RETRY_TOTAL = Counter(
@@ -82,7 +82,6 @@ TOKENS_PER_SEC = Histogram(
 CONCURRENT_REQUESTS = Gauge(
     "forge_concurrent_requests",
     "Currently in-flight requests",
-    ["team_id"],
 )
 
 CIRCUIT_BREAKER_STATE = Gauge(
@@ -98,35 +97,61 @@ PROVIDER_HEALTH = Gauge(
 )
 
 
+_MAX_LABEL_VALUES = 256
+_known_models: set[str] = set()
+_known_reasons: set[str] = set()
+
+
+def _bounded(value: str, seen: set[str] | None = None) -> str:
+    """Keep request-controlled labels from growing Prometheus memory forever."""
+    value = (value or "unknown")[:128]
+    if seen is None:
+        return value
+    if value in seen:
+        return value
+    if len(seen) >= _MAX_LABEL_VALUES:
+        return "other"
+    seen.add(value)
+    return value
+
+
 class MetricsCollector:
     """Thin wrapper so the rest of the code imports one thing."""
+
+    def register_models(self, models: list[str]) -> None:
+        """Pre-seed legitimate model names before traffic can invent labels."""
+        for model in models:
+            _bounded(model, _known_models)
 
     def record_request(
         self,
         provider: str,
         model: str,
         status: str,
-        team_id: str,
-        latency_s: float,
+        team_id: str | None = None,
+        latency_s: float = 0.0,
         input_tokens: int = 0,
         output_tokens: int = 0,
         cost: float = 0.0,
     ) -> None:
-        REQUEST_TOTAL.labels(provider=provider, model=model, status=status, team_id=team_id).inc()
+        # team_id is intentionally ignored: per-user UUID labels are unbounded
+        # and per-user analytics already live in Postgres.
+        model = _bounded(model, _known_models)
+        REQUEST_TOTAL.labels(provider=provider, model=model, status=status).inc()
         REQUEST_LATENCY.labels(provider=provider, model=model).observe(latency_s)
         if input_tokens:
             TOKENS_TOTAL.labels(
-                provider=provider, model=model, team_id=team_id, direction="input"
+                provider=provider, model=model, direction="input"
             ).inc(input_tokens)
         if output_tokens:
             TOKENS_TOTAL.labels(
-                provider=provider, model=model, team_id=team_id, direction="output"
+                provider=provider, model=model, direction="output"
             ).inc(output_tokens)
         if cost:
-            COST_TOTAL.labels(provider=provider, model=model, team_id=team_id).inc(cost)
+            COST_TOTAL.labels(provider=provider, model=model).inc(cost)
 
     def record_retry(self, provider: str, model: str) -> None:
-        RETRY_TOTAL.labels(provider=provider, model=model).inc()
+        RETRY_TOTAL.labels(provider=provider, model=_bounded(model, _known_models)).inc()
 
     def record_fallback(self, from_provider: str, to_provider: str) -> None:
         FALLBACK_TOTAL.labels(from_provider=from_provider, to_provider=to_provider).inc()
@@ -142,12 +167,15 @@ class MetricsCollector:
     def record_stream_timing(
         self, provider: str, model: str, ttft_s: float | None, tps: float | None
     ) -> None:
+        model = _bounded(model, _known_models)
         if ttft_s is not None:
             TTFT.labels(provider=provider, model=model).observe(ttft_s)
         if tps is not None:
             TOKENS_PER_SEC.labels(provider=provider, model=model).observe(tps)
 
     def record_finish_reason(self, provider: str, model: str, reason: str) -> None:
+        model = _bounded(model, _known_models)
+        reason = _bounded(reason, _known_reasons)
         FINISH_REASON_TOTAL.labels(provider=provider, model=model, reason=reason).inc()
 
     def set_circuit_breaker(self, provider: str, state: int) -> None:

@@ -132,8 +132,13 @@ async def test_resolve_user_cached_until_invalidated(redis):
     assert first.api_key == second.api_key
     assert first.name == second.name
 
+    # encrypted at rest in Redis, with a TTL
+    raw = await redis.get(byok._instance_key(uid))
+    assert b"sk-user-key" not in raw
+    assert await redis.ttl(byok._instance_key(uid)) > 0
+
     # Invalidate by directly deleting cache key
-    await redis.delete(f"byok:instances:{uid}")
+    await redis.delete(byok._instance_key(uid))
     third = (await byok.resolve_user(redis, uid, reg, db))[0]
     assert third is not first
 
@@ -271,3 +276,14 @@ async def test_disconnect_missing_row_404(redis):
     with pytest.raises(HTTPException) as exc:
         await byok.disconnect(db, uid, "groq", redis)
     assert exc.value.status_code == 404
+
+@pytest.mark.asyncio
+async def test_purge_legacy_cache_deletes_only_plaintext_entries(redis):
+    uid = str(uuid.uuid4())
+    legacy = f"byok:instances:{uid}"
+    current = byok._instance_key(uid)
+    await redis.set(legacy, '{"api_key": "plaintext"}')
+    await redis.set(current, "encrypted")
+    await byok.purge_legacy_cache(redis)
+    assert await redis.get(legacy) is None
+    assert await redis.get(current) == b"encrypted"

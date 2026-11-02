@@ -112,3 +112,28 @@ async def test_dedup_respects_sampling_params():
     await dedup.execute(SCOPE, cold, func)
     await dedup.execute(SCOPE, hot, func)
     assert func.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_dedup_waiter_retries_when_leader_is_cancelled():
+    """A disconnected leader must not leave waiters hanging forever."""
+    dedup = RequestDeduplicator()
+    calls = 0
+
+    async def func(req):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            await asyncio.sleep(10)
+        return f"result-{calls}"
+
+    req = _make_request()
+    leader = asyncio.create_task(dedup.execute(SCOPE, req, func))
+    await asyncio.sleep(0.01)
+    waiter = asyncio.create_task(dedup.execute(SCOPE, req, func))
+    await asyncio.sleep(0.01)
+    leader.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await leader
+    assert await asyncio.wait_for(waiter, timeout=1.0) == "result-2"
+    assert len(dedup._in_flight) == 0

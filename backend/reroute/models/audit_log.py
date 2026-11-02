@@ -45,6 +45,7 @@ class AuditLog(Base):
 
     is_stream: Mapped[bool] = mapped_column(default=False)
     is_cached: Mapped[bool] = mapped_column(default=False)
+    is_deduped: Mapped[bool] = mapped_column(default=False)
     fallback_from: Mapped[str | None] = mapped_column(String(64), nullable=True)
     retry_count: Mapped[int] = mapped_column(Integer, default=0)
 
