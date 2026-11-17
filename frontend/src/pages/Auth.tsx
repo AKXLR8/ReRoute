@@ -19,7 +19,6 @@ const FIELD =
 export default function Auth({ onLogin }: { onLogin: (u: SessionUser) => void }) {
   const [mode, setMode] = useState<'signin' | 'register'>('signin');
   const [firstRun, setFirstRun] = useState(false); // zero users → force register (no admin key needed)
-  const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -30,8 +29,7 @@ export default function Auth({ onLogin }: { onLogin: (u: SessionUser) => void })
   useEffect(() => {
     needsSetup()
       .then((r) => { if (r.needs_setup) { setMode('register'); setFirstRun(true); } })
-      .catch(() => {}) // backend down → normal form, error shows on submit
-      .finally(() => setChecking(false));
+      .catch(() => {}); // backend down → normal form, error shows on submit
   }, []);
 
   const isRegister = mode === 'register';
@@ -103,7 +101,7 @@ export default function Auth({ onLogin }: { onLogin: (u: SessionUser) => void })
         </Link>
 
         <div className="rounded-2xl p-6 sm:p-7" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
-          {!checking && !firstRun && (
+          {!firstRun && (
             <div className="flex items-center gap-1 p-1 rounded-lg mb-5" style={{ background: 'var(--bg-base)', border: '1px solid var(--border)' }}>
               <button type="button" onClick={() => switchMode('signin')} className={tabCls(mode === 'signin')}>Sign in</button>
               <button type="button" onClick={() => switchMode('register')} className={tabCls(mode === 'register')}>Create account</button>
@@ -172,18 +170,18 @@ export default function Auth({ onLogin }: { onLogin: (u: SessionUser) => void })
 
           <button
             onClick={submit}
-            disabled={!valid || busy || checking}
+            disabled={!valid || busy}
             className="w-full h-10 mt-4 rounded-lg text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98] hover:opacity-90"
             style={{ background: 'var(--purple)' }}
           >
             {busy ? (
               <><Loader2 className="w-4 h-4 animate-spin" /> {isRegister ? 'Creating account…' : 'Signing in…'}</>
-            ) : checking ? 'Checking…' : (
+            ) : (
               <>{isRegister ? 'Create account' : 'Sign in'} <ArrowRight className="w-4 h-4" /></>
             )}
           </button>
 
-          {!checking && (
+          {!firstRun && (
             <div className="mt-4 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="h-px flex-1" style={{ background: 'var(--border)' }} />
