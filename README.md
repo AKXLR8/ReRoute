@@ -1,29 +1,29 @@
-<p align="center">
-  <img src="assets/logo.png" width="120" alt="ReRouteAI logo">
-</p>
+<div align="center">
+  <img src="assets/logo.png" width="420" alt="ReRouteAI logo">
 
-<h1 align="center">ReRouteAI</h1>
+  <h1>ReRouteAI</h1>
 
-<p align="center">
-  <strong>One OpenAI-compatible API. Every LLM provider. Your users' keys.</strong><br />
-  Self-hosted &middot; Per-user BYOK &middot; Streaming &middot; Observability
-</p>
+  <p>
+    <strong>One OpenAI-compatible API. Every LLM provider. Your users' keys.</strong><br />
+    Self-hosted &middot; Per-user BYOK &middot; Streaming &middot; Observability
+  </p>
 
-<p align="center">
-  <a href="https://re-route-nzdy.vercel.app">Live demo</a> &middot;
-  <a href="https://re-route-pi.vercel.app/docs">API reference</a> &middot;
-  <a href="https://re-route-nzdy.vercel.app/status">Status</a> &middot;
-  <a href="https://github.com/AKXLR8/ReRoute/issues">Issues</a>
-</p>
+  <p>
+    <a href="https://re-route-nzdy.vercel.app">Live demo</a> &middot;
+    <a href="https://re-route-pi.vercel.app/docs">API reference</a> &middot;
+    <a href="https://re-route-nzdy.vercel.app/status">Status</a> &middot;
+    <a href="https://github.com/AKXLR8/ReRoute/issues">Issues</a>
+  </p>
 
-<p align="center">
-  <a href="https://github.com/AKXLR8/ReRoute/actions/workflows/ci.yml">
-    <img src="https://github.com/AKXLR8/ReRoute/actions/workflows/ci.yml/badge.svg" alt="CI status">
-  </a>
-  <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
-  <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
-  <img src="https://img.shields.io/badge/node-22%2B-339933" alt="Node 22+">
-</p>
+  <p>
+    <a href="https://github.com/AKXLR8/ReRoute/actions/workflows/ci.yml">
+      <img src="https://github.com/AKXLR8/ReRoute/actions/workflows/ci.yml/badge.svg" alt="CI status">
+    </a>
+    <img src="https://img.shields.io/badge/license-MIT-green" alt="License: MIT">
+    <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+    <img src="https://img.shields.io/badge/node-22%2B-339933" alt="Node 22+">
+  </p>
+</div>
 
 ReRouteAI is a self-hosted gateway between your applications and LLM providers.
 Accounts sign in, connect **their own** provider keys, and call an OpenAI-compatible
@@ -32,49 +32,57 @@ API. A React dashboard shows spend, logs, and per-user analytics.
 One deployment = one organization. This is not a multi-tenant SaaS: there are no
 teams, tenants, billing, or per-plan quotas.
 
-## Why ReRouteAI?
+## Features
 
-- **BYOK by default.** Each account uses its own provider keys; a deployment never
-  routes traffic through a shared key.
-- **Drop-in API.** OpenAI-compatible `/v1/chat/completions` with SSE streaming, so
-  existing SDKs work after a base URL change.
-- **Operational visibility.** Spend, logs, TTFT, tokens/sec, cache savings, provider
-  health, and Prometheus metrics in one place.
-- **Self-hosted and boring.** One deployment per organization, Postgres + Redis, no
-  control plane and no SaaS dependency.
+### Gateway
 
-## Honest status
+- OpenAI-compatible chat and SSE streaming through `/v1/chat/completions`, with
+  fallback across a user's providers.
+- Per-user rate limits (RPM / TPM / concurrent), semantic cache, and request dedup.
+- Retry with backoff and per-provider circuit breakers.
 
-Working and covered by tests:
+### Accounts and security
 
-- Chat + SSE streaming through `/v1/chat/completions`, with fallback across a user's providers
-- Per-user BYOK — each account owns its keys; no global key routes traffic
+- Self-service sign-up (email + password, 7+ chars), GitHub OAuth, admin/member
+  roles, refresh-token rotation, and user management.
+- Per-user BYOK: each account owns its keys, and no global key routes traffic.
+  Provider keys are Fernet-encrypted at rest and masked in responses.
 - Per-user gateway API keys (`rr_live_…`): SHA-256 hashed, shown once, revocable,
-  managed only from a signed-in session
-- Per-user rate limits (RPM / TPM / concurrent), semantic cache, request dedup
-- Retry with backoff, per-provider circuit breaker
-- Accounts: self-service sign-up (email+password, 7+ chars), GitHub OAuth, roles, refresh-token rotation, user management
-- Audit log, admin-only Prometheus metrics, analytics/breakdown/activity queries
-- Stream observability: TTFT (time-to-first-token), output tokens/sec,
-  finish_reason, and semantic-cache $-saved, on the audit rows, admin endpoints,
-  dashboard, and Prometheus
-- OpenTelemetry tracing: request spans + per-provider `llm.chat` spans over
-  OTLP/HTTP (opt-in, see [Telemetry](#telemetry))
-- Public status feed (`/status`, 10s cache) with API/Postgres/Redis checks plus
-  provider health, circuit state and latency — no keys, URLs or user data
-- React app: landing, model registry and docs (`/`, `/models`, `/docs`), public
-  status page (`/status`), dashboard (analytics with KPI strip and TTFT/tok-per-sec
-  chart, logs with a request drawer + copy-as-cURL + CSV export, models, settings,
-  users), live price-compare modal, rate-limit toasts with retry countdown,
-  dismissible onboarding checklist
+  and managed only from a signed-in session.
 
-Not built (don't plan around it):
+### Observability
+
+- Audit log, admin-only Prometheus metrics, and analytics/breakdown/activity queries.
+- Stream observability: TTFT, output tokens/sec, finish_reason, and semantic-cache
+  savings across audit rows, admin endpoints, the dashboard, and Prometheus.
+- OpenTelemetry tracing: request spans plus per-provider `llm.chat` spans over
+  OTLP/HTTP (opt-in, see [Telemetry](#telemetry)).
+- Public status feed (`/status`, 10s cache) with API/Postgres/Redis checks plus
+  provider health, circuit state, and latency. No keys, URLs, or user data.
+
+### Dashboard
+
+- Landing, model registry, and docs (`/`, `/models`, `/docs`).
+- Public status page (`/status`).
+- Analytics with a KPI strip and TTFT/tokens-per-second chart.
+- Logs with a request drawer, copy-as-cURL, and CSV export.
+- Models, settings, and users pages.
+- Live price-compare modal, rate-limit toasts with retry countdown, and a
+  dismissible onboarding checklist.
+
+## Project status
+
+Everything under [Features](#features) is working and covered by tests.
+
+### Not built
+
+Don't plan around these yet:
 
 - Multi-tenancy, teams, billing, per-plan rate limits — rate limits are global
   config values applied to every account equally
 - Frontend unit/e2e tests — the frontend gate is `tsc` + `oxlint` + build only
 
-Known rough edges:
+### Known rough edges
 
 - Prompt guardrails are regex rules (`prompt/guardrails.py`), not an ML classifier.
   They catch the obvious cases and are documented as approximate
@@ -535,7 +543,7 @@ node --experimental-strip-types scripts/check-timeago.mjs
 
 Load tests live in `backend/tests/load/locustfile.py` (`locust -f ...`).
 
-## Future scope
+## Roadmap
 
 Candidate work, not commitments or dates. Ordered roughly by leverage:
 
@@ -626,7 +634,7 @@ Contributions are welcome. Keep changes focused and easy to review.
 4. Open a pull request that explains the problem, the change, and how you verified it.
 
 Good places to start: providers (`backend/reroute/providers/`), documentation,
-frontend accessibility, and the ideas in [Future scope](#future-scope). For larger
+frontend accessibility, and the ideas in [Roadmap](#roadmap). For larger
 changes, open an issue first so the approach can be discussed before implementation.
 
 Please never paste API keys, access tokens, or `.env` contents into issues or pull
